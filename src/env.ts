@@ -7,4 +7,5 @@ export type Env = {
   OPERATOR_TOKEN?: string;
   Directory: DurableObjectNamespace<Directory>;
   Mind: DurableObjectNamespace<Mind>;
+  ASSETS: Fetcher;
 };

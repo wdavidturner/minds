@@ -1,0 +1,57 @@
+:root {
+  color: #1d1d1d;
+  background: #f7f5f0;
+  font-family: ui-serif, Georgia, serif;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  box-sizing: border-box;
+  margin: 0 auto;
+  max-width: 52rem;
+  padding: 3rem 1.5rem;
+}
+
+.gallery {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+
+.mind-card,
+form {
+  border: 1px solid #c9c3b8;
+  border-radius: 0.35rem;
+  padding: 1rem;
+}
+
+.slug,
+.status {
+  color: #665f55;
+  font-family: ui-monospace, monospace;
+}
+
+form {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+  padding: 0.45rem;
+}
+
+textarea {
+  min-height: 5rem;
+}

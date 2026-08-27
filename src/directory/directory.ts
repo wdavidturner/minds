@@ -1,5 +1,5 @@
 import { Think } from "@cloudflare/think";
-import { getAgentByName } from "agents";
+import { callable, getAgentByName } from "agents";
 import { tool } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
@@ -26,6 +26,47 @@ export class Directory extends Think<Env> {
     statement(this.sql.bind(this), DIRECTORY_DDL);
   }
 
+  @callable()
+  async createMind(input: {
+    slug: string;
+    name: string;
+    persona: string;
+    core: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    const existingSlugs = this.sql<{ slug: string }>`SELECT slug FROM minds`.map(
+      (row) => row.slug,
+    );
+    const validation = validateCreate(input, existingSlugs);
+    if (!validation.ok) return validation;
+
+    const now = Date.now();
+    this.sql`
+      INSERT INTO minds (slug, name, core_summary, temperament_json, status, created_at, archived_at)
+      VALUES (
+        ${input.slug}, ${input.name}, ${coreSummary(input.core)},
+        ${DEFAULT_TEMPERAMENT_JSON}, 'booting', ${now}, NULL
+      )
+    `;
+    try {
+      const bootstrapped = await (
+        await getAgentByName(this.env.Mind, input.slug)
+      ).bootstrap(input);
+      if (!bootstrapped.ok) return bootstrapped;
+      this.sql`UPDATE minds SET status = 'live' WHERE slug = ${input.slug}`;
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  }
+
+  @callable()
+  listMinds() {
+    return this.sql`
+      SELECT slug, name, core_summary, temperament_json, status, created_at, archived_at
+      FROM minds WHERE status != 'archived' ORDER BY created_at
+    `;
+  }
+
   getTools() {
     return {
       create_mind: tool({
@@ -36,41 +77,12 @@ export class Directory extends Think<Env> {
           persona: z.string(),
           core: z.string(),
         }),
-        execute: async (input) => {
-          const existingSlugs = this.sql<{ slug: string }>`SELECT slug FROM minds`.map(
-            (row) => row.slug,
-          );
-          const validation = validateCreate(input, existingSlugs);
-          if (!validation.ok) return validation;
-
-          const now = Date.now();
-          this.sql`
-            INSERT INTO minds (slug, name, core_summary, temperament_json, status, created_at, archived_at)
-            VALUES (
-              ${input.slug}, ${input.name}, ${coreSummary(input.core)},
-              ${DEFAULT_TEMPERAMENT_JSON}, 'booting', ${now}, NULL
-            )
-          `;
-          try {
-            const bootstrapped = await (
-              await getAgentByName(this.env.Mind, input.slug)
-            ).bootstrap(input);
-            if (!bootstrapped.ok) return bootstrapped;
-            this.sql`UPDATE minds SET status = 'live' WHERE slug = ${input.slug}`;
-            return { ok: true };
-          } catch (error) {
-            return { ok: false, error: String(error) };
-          }
-        },
+        execute: (input) => this.createMind(input),
       }),
       list_minds: tool({
         description: "List all non-archived Minds.",
         inputSchema: z.object({}),
-        execute: async () =>
-          this.sql`
-            SELECT slug, name, core_summary, temperament_json, status, created_at, archived_at
-            FROM minds WHERE status != 'archived' ORDER BY created_at
-          `,
+        execute: () => this.listMinds(),
       }),
       archive_mind: tool({
         description: "Archive a Mind in the directory.",

@@ -7,7 +7,15 @@ import { z } from "zod";
 import type { CreateMindInput } from "../directory/index-logic";
 import { DEFAULTS, DEFAULT_TEMPERAMENT } from "../defaults";
 import type { Env } from "../env";
-import { buildGraphPayload, type AgendaItemRow, type IdentityRow, type LineageRow, type SessionRow, type ThoughtRow } from "./graph";
+import {
+  buildGraphPayload,
+  type AgendaItemRow,
+  type GraphPayload,
+  type IdentityRow,
+  type LineageRow,
+  type SessionRow,
+  type ThoughtRow,
+} from "./graph";
 import { MIND_DDL, MIND_FLAGS_DDL } from "./schema";
 import { SqlStore } from "./sql-store";
 import { runSession, type ModelStep, type ThoughtRecord } from "./session-loop";
@@ -341,7 +349,12 @@ export class Mind extends Think<Env> {
     ].join("\n\n");
   }
 
-  private graphPayload() {
+  @callable()
+  publicGraph(): Promise<GraphPayload> {
+    return Promise.resolve(this.graphPayload());
+  }
+
+  private graphPayload(): GraphPayload {
     return buildGraphPayload(
       this.sql<IdentityRow>`SELECT * FROM identity`,
       this.sql<LineageRow>`SELECT * FROM lineages ORDER BY created_at`,
