@@ -4,6 +4,7 @@ import { gallery, type MindCard } from "./html/gallery";
 import { login } from "./html/login";
 import { mindOperator } from "./html/mind-op";
 import { mindPublic } from "./html/mind-public";
+import { newMindForm } from "./html/new-mind-form";
 import { layout } from "./html/layout";
 import type { Env } from "./env";
 import { matchRoute } from "./routes";
@@ -27,25 +28,11 @@ function formText(formData: FormData, name: string): string {
   return typeof value === "string" ? value : "";
 }
 
-function newMindForm(): string {
-  return layout(
-    "New Mind",
-    `<h1>New Mind</h1>
-<form method="post" action="/op/new">
-  <label>Slug <input name="slug" required></label>
-  <label>Name <input name="name" required></label>
-  <label>Persona <textarea name="persona" required></textarea></label>
-  <label>Core <textarea name="core" required></textarea></label>
-  <button>Create</button>
-</form>`,
-  );
-}
-
 function directoryPage(): string {
   return layout(
     "Directory",
     `<h1>Directory</h1>
-<a href="/op/new">New Mind</a>
+${newMindForm()}
 <form method="post" action="/op/directory/chat">
   <label>Message <textarea name="input" required></textarea></label>
   <button>Send</button>
@@ -115,7 +102,7 @@ export default {
 
     if (route.kind === "op-new") {
       if (request.method === "GET") {
-        return new Response(newMindForm(), {
+        return new Response(layout("New Mind", `<h1>New Mind</h1>${newMindForm()}`), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       }
