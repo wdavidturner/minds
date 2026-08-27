@@ -1,5 +1,6 @@
 import type { ApplyResult } from "./apply-outcome";
 import type { SessionStore, ThoughtRecord } from "./session-loop";
+import { DEFAULTS } from "../defaults";
 import type { BriefType, LineageKind, LineageStatus, MindSnapshot } from "../types";
 
 type Sql = <T = Record<string, string | number | boolean | null>>(
@@ -18,10 +19,18 @@ function id(): string {
   return crypto.randomUUID();
 }
 
+function isSqliteFull(error: unknown): boolean {
+  return String(error).includes("SQLITE_FULL");
+}
+
 export class SqlStore implements SessionStore {
   wakeSeconds = 0;
+  private writeStopped = false;
 
-  constructor(private readonly sql: Sql) {}
+  constructor(
+    private readonly sql: Sql,
+    private readonly onWriteStopped?: () => void,
+  ) {}
 
   snapshot(): MindSnapshot {
     const identity = this.sql<{ paused: number }>`SELECT paused FROM identity LIMIT 1`[0];
@@ -83,19 +92,26 @@ export class SqlStore implements SessionStore {
     if (!session) throw new Error("Session is required");
 
     const thoughtId = id();
-    this.sql`
-      INSERT INTO thoughts (
-        id, session_id, lineage_id, suggestion_id, parent_id, body, distance_to_core, created_at
-      ) VALUES (
-        ${thoughtId}, ${sessionId}, ${session.lineage_id}, NULL, ${thought.parentId},
-        ${thought.body}, ${thought.distanceToCore}, ${Date.now()}
-      )
-    `;
-    this.sql`
-      UPDATE sessions
-      SET thought_count = thought_count + 1, ended_at = ${Date.now()}
-      WHERE id = ${sessionId}
-    `;
+    try {
+      this.sql`
+        INSERT INTO thoughts (
+          id, session_id, lineage_id, suggestion_id, parent_id, body, distance_to_core, created_at
+        ) VALUES (
+          ${thoughtId}, ${sessionId}, ${session.lineage_id}, NULL, ${thought.parentId},
+          ${thought.body}, ${thought.distanceToCore}, ${Date.now()}
+        )
+      `;
+      this.sql`
+        UPDATE sessions
+        SET thought_count = thought_count + 1, ended_at = ${Date.now()}
+        WHERE id = ${sessionId}
+      `;
+    } catch (error) {
+      if (!isSqliteFull(error)) throw error;
+      this.writeStopped = true;
+      this.setWake(DEFAULTS.idleSleepSeconds * 10);
+      this.onWriteStopped?.();
+    }
     return thoughtId;
   }
 
@@ -159,6 +175,10 @@ export class SqlStore implements SessionStore {
 
   setWake(seconds: number): void {
     this.wakeSeconds = seconds;
+  }
+
+  isWriteStopped(): boolean {
+    return this.writeStopped;
   }
 
   recentLine(lineageId: string | null): string {

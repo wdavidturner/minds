@@ -1,10 +1,14 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("isolation", () => {
-  it("Mind module does not look up other Minds", () => {
-    const src = readFileSync("src/mind/mind.ts", "utf8");
-    expect(src).not.toMatch(/getAgentByName/);
+  it("Mind modules do not look up other Minds", () => {
+    const sources = readdirSync("src/mind")
+      .filter((entry) => entry.endsWith(".ts"))
+      .map((entry) => readFileSync(join("src/mind", entry), "utf8"));
+
+    expect(sources.join("\n")).not.toMatch(/getAgentByName/);
   });
 
   it("requires MODEL instead of hard-coding a model fallback", () => {

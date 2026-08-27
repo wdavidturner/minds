@@ -21,6 +21,7 @@ export type SessionStore = {
   createLineageFromSuggestion(suggestionId: string): string;
   pickQueuedSuggestionId(): string | null;
   isAborted?(): boolean;
+  isWriteStopped?(): boolean;
 };
 
 export type ModelStep = (input: {
@@ -83,6 +84,7 @@ export async function runSession(
 
     store.recordThought(sessionId, step.thought);
     count++;
+    if (store.isWriteStopped?.()) break;
 
     if (step.outcome === "select_suggestion") {
       const suggestionId = step.suggestionId ?? store.pickQueuedSuggestionId();
@@ -129,6 +131,9 @@ export async function runSession(
 
   if (!outcome) {
     outcome = "continue_line";
+    if (store.isWriteStopped?.()) {
+      return { sessionId, brief, thoughtCount: count, outcome };
+    }
     applyResult = applyOutcome({
       outcome: "continue_line",
       brief,

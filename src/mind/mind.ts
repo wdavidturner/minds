@@ -78,6 +78,7 @@ function statement(sql: (strings: TemplateStringsArray) => unknown, query: strin
 
 export class Mind extends Think<Env> {
   private ponderPromise: Promise<void> | undefined;
+  private storageFull = false;
 
   getModel() {
     if (!this.env.MODEL) throw new Error("MODEL is required");
@@ -210,7 +211,9 @@ export class Mind extends Think<Env> {
   }
 
   private async runPonderSession(): Promise<void> {
-    const store = new SqlStore(this.sql.bind(this));
+    const store = new SqlStore(this.sql.bind(this), () => {
+      this.storageFull = true;
+    });
     store.clearAbort();
     await runSession(store, this.modelStep(store), Date.now);
     await this.workspace.writeFile("public/graph.json", JSON.stringify(this.graphPayload()));
@@ -352,6 +355,11 @@ export class Mind extends Think<Env> {
   @callable()
   publicGraph(): Promise<GraphPayload> {
     return Promise.resolve(this.graphPayload());
+  }
+
+  @callable()
+  storageStatus(): { storageFull: boolean } {
+    return { storageFull: this.storageFull };
   }
 
   private graphPayload(): GraphPayload {

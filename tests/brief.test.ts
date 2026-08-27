@@ -14,6 +14,10 @@ const empty: MindSnapshot = {
 };
 
 describe("decideBrief", () => {
+  it("force beats talk", () => {
+    expect(decideBrief({ ...empty, forcePending: true, talkPending: true })).toBe("relate");
+  });
+
   it("force beats agenda", () => {
     expect(
       decideBrief({ ...empty, forcePending: true, agendaPendingCount: 3, hasOpenBranch: true }),

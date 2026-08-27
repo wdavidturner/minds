@@ -95,7 +95,9 @@ export default {
 
     if (route.kind === "mind-op" && request.method === "GET") {
       if (!(await knownMind(route.slug, env))) return new Response("Not found", { status: 404 });
-      return new Response(mindOperator(route.slug), {
+      const mind = await getAgentByName(env.Mind, route.slug);
+      const { storageFull } = await mind.storageStatus();
+      return new Response(mindOperator(route.slug, storageFull), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     }
