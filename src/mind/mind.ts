@@ -1,4 +1,5 @@
 import { Think, type TurnContext } from "@cloudflare/think";
+import { createWorkspaceTools } from "@cloudflare/think/tools/workspace";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import { callable, type RetryOptions } from "agents";
 import { generateText, tool } from "ai";
@@ -16,9 +17,11 @@ import {
   type SessionRow,
   type ThoughtRow,
 } from "./graph";
+import { buildPonderPrompt } from "./prompt";
 import { MIND_DDL, MIND_FLAGS_DDL } from "./schema";
 import { SqlStore } from "./sql-store";
 import { runSession, type ModelStep, type ThoughtRecord } from "./session-loop";
+import { checkOutcome } from "./tool-guards";
 import { activeLineageOrFallback, type VerbLineage } from "./verbs";
 import type { BriefType, Outcome } from "../types";
 
@@ -79,6 +82,7 @@ function statement(sql: (strings: TemplateStringsArray) => unknown, query: strin
 export class Mind extends Think<Env> {
   private ponderPromise: Promise<void> | undefined;
   private storageFull = false;
+  private currentAbortController: AbortController | undefined;
 
   getModel() {
     if (!this.env.MODEL) throw new Error("MODEL is required");
@@ -214,9 +218,27 @@ export class Mind extends Think<Env> {
   private async runPonderSession(): Promise<void> {
     const store = new SqlStore(this.sql.bind(this), () => this.markStorageFull());
     store.clearAbort();
-    await runSession(store, this.modelStep(store), Date.now);
-    await this.workspace.writeFile("public/graph.json", JSON.stringify(this.graphPayload()));
-    await this.schedule(store.wakeSeconds, "runPonder", {});
+    const controller = new AbortController();
+    this.currentAbortController = controller;
+
+    // Graph write and the next wake are independently best-effort: a bad
+    // model call or a workspace write failure must never leave the Mind
+    // without a scheduled wake (that would kill it silently).
+    try {
+      await runSession(store, this.modelStep(store, controller.signal), Date.now);
+    } catch (error) {
+      console.error("Mind ponder session failed:", error);
+    } finally {
+      if (this.currentAbortController === controller) this.currentAbortController = undefined;
+    }
+
+    try {
+      await this.workspace.writeFile("public/graph.json", JSON.stringify(this.graphPayload()));
+    } catch (error) {
+      console.error("Mind graph publish failed:", error);
+    }
+
+    await this.schedule(store.wakeSeconds || DEFAULTS.idleSleepSeconds, "runPonder", {});
   }
 
   async beforeTurn(ctx: TurnContext): Promise<{ model: LanguageModelV3 } | void> {
@@ -229,6 +251,7 @@ export class Mind extends Think<Env> {
 
   getTools() {
     return {
+      ...createWorkspaceTools(this.workspace),
       record_thought: tool({
         description: "Record one concise thought for the current pondering step.",
         inputSchema: z.object({
@@ -247,6 +270,22 @@ export class Mind extends Think<Env> {
           endSession: z.boolean().optional(),
         }),
         execute: async (input) => input,
+      }),
+      set_wake: tool({
+        description: "Request the next wake time in seconds instead of the computed default.",
+        inputSchema: z.object({ seconds: z.number().min(1) }),
+        execute: async (input) => input,
+      }),
+      search_thoughts: tool({
+        description: "Search this Mind's recorded thoughts for a keyword.",
+        inputSchema: z.object({ query: z.string() }),
+        execute: async ({ query }) => ({
+          results: this.sql<{ id: string; body: string; lineage_id: string; created_at: number }>`
+            SELECT id, body, lineage_id, created_at FROM thoughts
+            WHERE body LIKE ${`%${query}%`}
+            ORDER BY created_at DESC LIMIT 20
+          `,
+        }),
       }),
       fetch_url: tool({
         description: "Fetch a URL and return up to 20,000 characters of text.",
@@ -272,17 +311,19 @@ export class Mind extends Think<Env> {
     };
   }
 
-  private modelStep(store: SqlStore): ModelStep {
+  private modelStep(store: SqlStore, signal: AbortSignal): ModelStep {
     return async ({ brief, legal, recent, thoughtCount, elapsedMs, remainingMs, windDown }) => {
       let thought: ThoughtRecord | undefined;
       let outcome: Outcome | undefined;
       let agendaTexts: string[] | undefined;
       let suggestionId: string | undefined;
       let endSession = false;
+      let wakeSecondsOverride: number | undefined;
       const tools = this.getTools();
 
       const result = await generateText({
         model: this.getModel(),
+        abortSignal: signal,
         system: this.ponderPrompt(brief, legal, elapsedMs, remainingMs, windDown, store),
         prompt: `Recent thought: ${recent || "(none)"}\nThoughts this session: ${thoughtCount}`,
         tools: {
@@ -308,10 +349,20 @@ export class Mind extends Think<Env> {
               endSession: z.boolean().optional(),
             }),
             execute: async (input) => {
+              const check = checkOutcome(input.outcome, legal);
+              if (!check.ok) return check;
               outcome = input.outcome;
               agendaTexts = input.agendaTexts;
               suggestionId = input.suggestionId;
               endSession = input.endSession ?? false;
+              return { ok: true };
+            },
+          }),
+          set_wake: tool({
+            description: tools.set_wake.description,
+            inputSchema: z.object({ seconds: z.number().min(1) }),
+            execute: async (input) => {
+              wakeSecondsOverride = input.seconds;
               return { ok: true };
             },
           }),
@@ -325,6 +376,7 @@ export class Mind extends Think<Env> {
         agendaTexts,
         suggestionId,
         endSession,
+        wakeSecondsOverride,
       };
     };
   }
@@ -339,16 +391,22 @@ export class Mind extends Think<Env> {
   ): string {
     const identity = this.sql<IdentityRow>`SELECT * FROM identity LIMIT 1`[0];
     if (!identity) throw new Error("Mind must be bootstrapped before pondering");
-    return [
-      `Persona:\n${identity.persona}`,
-      `Core:\n${identity.core}`,
-      `Brief: ${brief}`,
-      `Legal outcomes: ${legal.join(", ")}`,
-      `Elapsed milliseconds: ${elapsedMs}`,
-      `Remaining milliseconds: ${remainingMs}`,
-      `Wind down: ${windDown}`,
-      "Use record_thought once. Use set_outcome only with a legal outcome when ready.",
-    ].join("\n\n");
+    return buildPonderPrompt({
+      persona: identity.persona,
+      core: identity.core,
+      brief,
+      legal,
+      elapsedMs,
+      remainingMs,
+      windDown,
+      text: {
+        queuedSuggestions: brief === "inbox_glance" ? store.queuedSuggestions() : [],
+        probeText: brief === "relate" || brief === "dig" ? store.activeProbeText() : undefined,
+        talkTexts: brief === "talk" ? store.consumeTalkTexts() : [],
+        agendaItemText: brief === "pursue_agenda" ? store.activeAgendaItemText() : undefined,
+        minThoughts: DEFAULTS.minThoughts,
+      },
+    });
   }
 
   @callable()
@@ -359,6 +417,27 @@ export class Mind extends Think<Env> {
   @callable()
   storageStatus(): { storageFull: boolean } {
     return { storageFull: this.storageFull };
+  }
+
+  @callable()
+  async publicNotes(): Promise<{ id: string }[]> {
+    try {
+      const files = await this.workspace.readDir("public/notes");
+      return files
+        .filter((file) => file.type === "file" && file.name.endsWith(".md"))
+        .map((file) => ({ id: file.name.replace(/\.md$/, "") }));
+    } catch {
+      return [];
+    }
+  }
+
+  @callable()
+  async readNote(noteId: string): Promise<string | null> {
+    try {
+      return await this.workspace.readFile(`public/notes/${noteId}.md`);
+    } catch {
+      return null;
+    }
   }
 
   private async markStorageFull(): Promise<void> {
@@ -382,6 +461,7 @@ export class Mind extends Think<Env> {
 
   private abortGeneration(): void {
     this.sql`UPDATE flags SET abort_generation = 1`;
+    this.currentAbortController?.abort();
   }
 
   private lineagesForTalk(): VerbLineage[] {

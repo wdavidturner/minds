@@ -1,4 +1,5 @@
 import type { ApplyResult } from "./apply-outcome";
+import { decideBrief } from "./brief";
 import type { SessionStore, ThoughtRecord } from "./session-loop";
 import { DEFAULTS } from "../defaults";
 import type { BriefType, LineageKind, LineageStatus, MindSnapshot } from "../types";
@@ -46,7 +47,11 @@ export class SqlStore implements SessionStore {
       LIMIT 1
     `[0];
     const [agenda, relating, open, queued, flags] = [
-      this.sql<{ count: number }>`SELECT COUNT(*) AS count FROM agenda_items WHERE status = 'pending'`[0],
+      // 'active' agenda items are still open work; counting only 'pending' let a
+      // session that marked its item 'active' fall out of pursue_agenda early.
+      this.sql<{ count: number }>`
+        SELECT COUNT(*) AS count FROM agenda_items WHERE status IN ('pending', 'active')
+      `[0],
       this.sql<{ count: number }>`SELECT COUNT(*) AS count FROM lineages WHERE status = 'relating'`[0],
       this.sql<{ count: number }>`SELECT COUNT(*) AS count FROM lineages WHERE status IN ('relating', 'exploring')`[0],
       this.sql<{ count: number }>`SELECT COUNT(*) AS count FROM suggestions WHERE status = 'queued'`[0],
@@ -81,6 +86,8 @@ export class SqlStore implements SessionStore {
     `[0]?.id;
     if (!coreId) throw new Error("Core lineage is required");
 
+    if (brief === "pursue_agenda") this.beginActiveAgendaItem();
+
     const sessionId = id();
     const now = Date.now();
     this.sql`
@@ -90,6 +97,23 @@ export class SqlStore implements SessionStore {
     return sessionId;
   }
 
+  /**
+   * Picks the item pursue_agenda will work this session: whichever is already
+   * 'active' (resumed from a prior continue_line), else the oldest 'pending'
+   * one, promoted to 'active'. Without this, agenda_items never move past
+   * 'pending' and pursue_agenda starves every other brief forever.
+   */
+  private beginActiveAgendaItem(): void {
+    const active = this.sql<{ id: string }>`SELECT id FROM agenda_items WHERE status = 'active' LIMIT 1`[0];
+    if (active) return;
+    const nextPending = this.sql<{ id: string }>`
+      SELECT id FROM agenda_items WHERE status = 'pending' ORDER BY rowid LIMIT 1
+    `[0];
+    if (nextPending) {
+      this.sql`UPDATE agenda_items SET status = 'active' WHERE id = ${nextPending.id}`;
+    }
+  }
+
   async recordThought(sessionId: string, thought: ThoughtRecord): Promise<string> {
     this.ensureWritable();
     const session = this.sql<{ lineage_id: string }>`
@@ -97,13 +121,17 @@ export class SqlStore implements SessionStore {
     `[0];
     if (!session) throw new Error("Session is required");
 
+    const lineage = this.sql<{ suggestion_id: string | null }>`
+      SELECT suggestion_id FROM lineages WHERE id = ${session.lineage_id}
+    `[0];
+
     const thoughtId = id();
     try {
       this.sql`
         INSERT INTO thoughts (
           id, session_id, lineage_id, suggestion_id, parent_id, body, distance_to_core, created_at
         ) VALUES (
-          ${thoughtId}, ${sessionId}, ${session.lineage_id}, NULL, ${thought.parentId},
+          ${thoughtId}, ${sessionId}, ${session.lineage_id}, ${lineage?.suggestion_id ?? null}, ${thought.parentId},
           ${thought.body}, ${thought.distanceToCore}, ${Date.now()}
         )
       `;
@@ -149,6 +177,11 @@ export class SqlStore implements SessionStore {
       }
     }
 
+    // conclude/park inside pursue_agenda close the agenda item, not the lineage.
+    if (result.agendaItemDone) {
+      this.sql`UPDATE agenda_items SET status = 'done' WHERE status = 'active'`;
+    }
+
     for (const text of result.agendaTexts ?? []) {
       const thoughtId = this.sql<{ id: string }>`
         SELECT id FROM thoughts WHERE session_id = ${sessionId} ORDER BY created_at DESC LIMIT 1
@@ -174,10 +207,17 @@ export class SqlStore implements SessionStore {
         ))
       `;
     }
-    this.sql`
-      UPDATE sessions SET outcome = COALESCE(outcome, 'continue_line'), ended_at = ${now}
-      WHERE id = ${sessionId}
-    `;
+
+    // Only the outcome that actually ends the session may set sessions.outcome.
+    // select_suggestion/ignore_inbox apply mid-session (brief changes, loop
+    // continues) and must not latch a placeholder outcome that a later
+    // conclude/park/continue_line can never overwrite.
+    if (result.outcome) {
+      this.sql`
+        UPDATE sessions SET outcome = ${result.outcome}, ended_at = ${now}
+        WHERE id = ${sessionId}
+      `;
+    }
   }
 
   setWake(seconds: number): void {
@@ -197,14 +237,20 @@ export class SqlStore implements SessionStore {
   }
 
   legalUnderlyingBrief(): BriefType | undefined {
-    return undefined;
+    const snapshot = this.snapshot();
+    return decideBrief({
+      ...snapshot,
+      forcePending: false,
+      talkPending: false,
+      agendaPendingCount: 0,
+    });
   }
 
   activeLineageId(): string | null {
     return this.snapshot().activeLineage?.id ?? null;
   }
 
-  createLineageFromSuggestion(suggestionId: string): string {
+  createLineageFromSuggestion(suggestionId: string, sessionId: string): string {
     this.ensureWritable();
     const lineageId = id();
     this.sql`
@@ -213,6 +259,9 @@ export class SqlStore implements SessionStore {
       ) VALUES (${lineageId}, 'suggestion', ${suggestionId}, 'relating', NULL, 0, ${Date.now()}, NULL)
     `;
     this.sql`UPDATE suggestions SET status = 'selected', lineage_id = ${lineageId} WHERE id = ${suggestionId}`;
+    // Thoughts attach via sessions.lineage_id; without this, thoughts recorded
+    // after select_suggestion still tag the session's original (core) lineage.
+    this.sql`UPDATE sessions SET lineage_id = ${lineageId} WHERE id = ${sessionId}`;
     return lineageId;
   }
 
@@ -231,5 +280,46 @@ export class SqlStore implements SessionStore {
   clearAbort(): void {
     this.ensureWritable();
     this.sql`UPDATE flags SET abort_generation = 0`;
+  }
+
+  // --- Prompt/tool text context (operator input the model must see) ---
+
+  queuedSuggestions(): { id: string; text: string }[] {
+    return this.sql<{ id: string; text: string }>`
+      SELECT id, text FROM suggestions WHERE status = 'queued' ORDER BY created_at
+    `;
+  }
+
+  /** The suggestion text behind the active relating/dig probe, if any. */
+  activeProbeText(): string | undefined {
+    const activeId = this.activeLineageId();
+    if (!activeId) return undefined;
+    return this.sql<{ text: string }>`
+      SELECT s.text AS text
+      FROM lineages l
+      JOIN suggestions s ON s.id = l.suggestion_id
+      WHERE l.id = ${activeId}
+    `[0]?.text;
+  }
+
+  /** Unconsumed talk utterances, marked consumed so they surface exactly once. */
+  consumeTalkTexts(): string[] {
+    const rows = this.sql<{ id: string; text: string }>`
+      SELECT id, text FROM utterances WHERE consumed_at IS NULL ORDER BY created_at
+    `;
+    if (rows.length === 0 || this.writeStopped) return rows.map((row) => row.text);
+    const now = Date.now();
+    for (const row of rows) {
+      try {
+        this.sql`UPDATE utterances SET consumed_at = ${now} WHERE id = ${row.id}`;
+      } catch {
+        break;
+      }
+    }
+    return rows.map((row) => row.text);
+  }
+
+  activeAgendaItemText(): string | undefined {
+    return this.sql<{ text: string }>`SELECT text FROM agenda_items WHERE status = 'active' LIMIT 1`[0]?.text;
   }
 }

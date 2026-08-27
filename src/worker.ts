@@ -11,7 +11,15 @@ import { matchRoute } from "./routes";
 
 export { matchRoute } from "./routes";
 
-function isAuthorized(request: Request, env: Env): boolean {
+type TurnMessagePart = { type: string; text?: string };
+type TurnResultLike = { message?: { parts?: TurnMessagePart[] } };
+
+/**
+ * `?token=` is only accepted on `/agents/*` (WebSocket upgrades cannot set a
+ * cookie or header before connecting). Every other operator route requires
+ * the cookie or `Authorization: Bearer`, matching the spec's auth surface.
+ */
+function isAgentsAuthorized(request: Request, env: Env): boolean {
   const queryToken = new URL(request.url).searchParams.get("token");
   return (
     isOperator(request, env.OPERATOR_TOKEN) ||
@@ -26,6 +34,14 @@ function redirect(location: string): Response {
 function formText(formData: FormData, name: string): string {
   const value = formData.get(name);
   return typeof value === "string" ? value : "";
+}
+
+function turnResultText(result: TurnResultLike): string {
+  const text = (result.message?.parts ?? [])
+    .filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("");
+  return text || "(no response)";
 }
 
 function directoryPage(): string {
@@ -53,11 +69,11 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/agents/")) {
-      if (!isAuthorized(request, env)) return unauthorized();
+      if (!isAgentsAuthorized(request, env)) return unauthorized();
       return (
         (await routeAgentRequest(request, env, {
           onBeforeConnect: (connectRequest) =>
-            isAuthorized(connectRequest, env) ? undefined : unauthorized(),
+            isAgentsAuthorized(connectRequest, env) ? undefined : unauthorized(),
         })) ?? new Response("Not found", { status: 404 })
       );
     }
@@ -86,12 +102,21 @@ export default {
     if (route.kind === "mind-public" && request.method === "GET") {
       if (!(await knownMind(route.slug, env))) return new Response("Not found", { status: 404 });
       const mind = await getAgentByName(env.Mind, route.slug);
-      return new Response(mindPublic(await mind.publicGraph()), {
+      const [graph, notes] = await Promise.all([mind.publicGraph(), mind.publicNotes()]);
+      return new Response(mindPublic(graph, notes), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     }
 
-    if (!isAuthorized(request, env) && route.kind !== "unknown") return unauthorized();
+    if (route.kind === "mind-note" && request.method === "GET") {
+      if (!(await knownMind(route.slug, env))) return new Response("Not found", { status: 404 });
+      const mind = await getAgentByName(env.Mind, route.slug);
+      const note = await mind.readNote(route.noteId);
+      if (note === null) return new Response("Not found", { status: 404 });
+      return new Response(note, { headers: { "Content-Type": "text/markdown; charset=utf-8" } });
+    }
+
+    if (!isOperator(request, env.OPERATOR_TOKEN) && route.kind !== "unknown") return unauthorized();
 
     if (route.kind === "mind-op" && request.method === "GET") {
       if (!(await knownMind(route.slug, env))) return new Response("Not found", { status: 404 });
@@ -132,9 +157,9 @@ export default {
       const input = formText(await request.formData(), "input");
       const runTurn = (await directory(env)).runTurn as unknown as (
         payload: { input: string },
-      ) => Promise<unknown>;
+      ) => Promise<TurnResultLike>;
       const result = await runTurn({ input });
-      return new Response(String(result));
+      return new Response(turnResultText(result));
     }
 
     if (route.kind === "mind-action" && request.method === "POST") {

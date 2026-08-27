@@ -18,7 +18,7 @@ export type SessionStore = {
   recentLine(lineageId: string | null): string;
   legalUnderlyingBrief(): BriefType | undefined;
   activeLineageId(): string | null;
-  createLineageFromSuggestion(suggestionId: string): string;
+  createLineageFromSuggestion(suggestionId: string, sessionId: string): string;
   pickQueuedSuggestionId(): string | null;
   isAborted?(): boolean;
   isWriteStopped?(): boolean;
@@ -38,6 +38,8 @@ export type ModelStep = (input: {
   agendaTexts?: string[];
   suggestionId?: string;
   endSession?: boolean;
+  /** Explicit wake request from the set_wake tool; wins over the computed default. */
+  wakeSecondsOverride?: number;
 }>;
 
 export async function runSession(
@@ -56,6 +58,7 @@ export async function runSession(
 
   let outcome: Outcome | undefined;
   let applyResult: ApplyResult = { lineage: null, wakeHot: false };
+  let explicitWakeSeconds: number | undefined;
   let count = 0;
 
   while (true) {
@@ -84,11 +87,12 @@ export async function runSession(
 
     await store.recordThought(sessionId, step.thought);
     count++;
+    if (step.wakeSecondsOverride !== undefined) explicitWakeSeconds = step.wakeSecondsOverride;
     if (store.isWriteStopped?.()) break;
 
     if (step.outcome === "select_suggestion") {
       const suggestionId = step.suggestionId ?? store.pickQueuedSuggestionId();
-      if (suggestionId) store.createLineageFromSuggestion(suggestionId);
+      if (suggestionId) store.createLineageFromSuggestion(suggestionId, sessionId);
       applyResult = applyOutcome({
         outcome: "select_suggestion",
         brief,
@@ -117,6 +121,7 @@ export async function runSession(
         outcome: step.outcome,
         brief,
         activeLineageId: store.activeLineageId(),
+        activeLineageKind: store.snapshot().activeLineage?.kind,
         agendaTexts: step.agendaTexts,
       });
       store.apply(applyResult, sessionId);
@@ -138,11 +143,12 @@ export async function runSession(
       outcome: "continue_line",
       brief,
       activeLineageId: store.activeLineageId(),
+      activeLineageKind: store.snapshot().activeLineage?.kind,
     });
     store.apply(applyResult, sessionId);
   }
 
-  store.setWake(nextWakeSeconds(applyResult, DEFAULTS));
+  store.setWake(explicitWakeSeconds ?? nextWakeSeconds(applyResult, DEFAULTS));
 
   return { sessionId, brief, thoughtCount: count, outcome };
 }

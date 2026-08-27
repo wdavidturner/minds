@@ -4,7 +4,7 @@ import { tool } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 import type { Env } from "../env";
-import { coreSummary, validateCreate } from "./index-logic";
+import { coreSummary, partitionExistingSlugs, validateCreate } from "./index-logic";
 import { DEFAULT_TEMPERAMENT_JSON, DIRECTORY_DDL } from "./schema";
 
 function statement(sql: (strings: TemplateStringsArray) => unknown, query: string): void {
@@ -33,25 +33,31 @@ export class Directory extends Think<Env> {
     persona: string;
     core: string;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
-    const existingSlugs = this.sql<{ slug: string }>`SELECT slug FROM minds`.map(
-      (row) => row.slug,
-    );
-    const validation = validateCreate(input, existingSlugs);
+    const rows = this.sql<{ slug: string; status: string }>`SELECT slug, status FROM minds`;
+    const { retryingBoot, blockingSlugs } = partitionExistingSlugs(rows, input.slug);
+    const validation = validateCreate(input, blockingSlugs);
     if (!validation.ok) return validation;
 
-    const now = Date.now();
-    this.sql`
-      INSERT INTO minds (slug, name, core_summary, temperament_json, status, created_at, archived_at)
-      VALUES (
-        ${input.slug}, ${input.name}, ${coreSummary(input.core)},
-        ${DEFAULT_TEMPERAMENT_JSON}, 'booting', ${now}, NULL
-      )
-    `;
+    if (!retryingBoot) {
+      const now = Date.now();
+      this.sql`
+        INSERT INTO minds (slug, name, core_summary, temperament_json, status, created_at, archived_at)
+        VALUES (
+          ${input.slug}, ${input.name}, ${coreSummary(input.core)},
+          ${DEFAULT_TEMPERAMENT_JSON}, 'booting', ${now}, NULL
+        )
+      `;
+    }
     try {
       const bootstrapped = await (
         await getAgentByName(this.env.Mind, input.slug)
       ).bootstrap(input);
-      if (!bootstrapped.ok) return bootstrapped;
+      // The Mind DO can already be bootstrapped even if the Directory row is
+      // still `booting` (e.g. a crash between bootstrap and this UPDATE) —
+      // that is exactly the retryable case, not a failure.
+      if (!bootstrapped.ok && bootstrapped.error !== "Mind is already bootstrapped") {
+        return bootstrapped;
+      }
       this.sql`UPDATE minds SET status = 'live' WHERE slug = ${input.slug}`;
       return { ok: true };
     } catch (error) {

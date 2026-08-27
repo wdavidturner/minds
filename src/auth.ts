@@ -19,12 +19,28 @@ export function readOperatorToken(request: Request): string | null {
   return null;
 }
 
+/**
+ * Loop length depends only on the longer string, not on where the first
+ * mismatch is, so comparing the operator token does not leak match length
+ * through response timing the way `===` can.
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  const maxLength = Math.max(a.length, b.length);
+  let mismatch = a.length === b.length ? 0 : 1;
+  for (let i = 0; i < maxLength; i++) {
+    mismatch |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return mismatch === 0;
+}
+
 export function isOperator(
   request: Request,
   token: string | undefined,
 ): boolean {
   if (!token) return false;
-  return readOperatorToken(request) === token;
+  const provided = readOperatorToken(request);
+  if (provided === null) return false;
+  return timingSafeEqual(provided, token);
 }
 
 export function unauthorized(): Response {
@@ -32,5 +48,5 @@ export function unauthorized(): Response {
 }
 
 export function operatorCookieHeader(token: string): string {
-  return `${OPERATOR_COOKIE}=${token}; Path=/; HttpOnly`;
+  return `${OPERATOR_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax`;
 }
