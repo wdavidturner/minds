@@ -4,7 +4,12 @@ import {
   validateCreate,
   type CreateMindInput,
 } from "../src/directory/index-logic";
-import { DIRECTORY_DDL } from "../src/directory/schema";
+import {
+  DEFAULT_TEMPERAMENT_JSON,
+  DIRECTORY_DDL,
+  DIRECTORY_STATUSES,
+  type DirectoryStatus,
+} from "../src/directory/schema";
 
 const validInput: CreateMindInput = {
   slug: "ada",
@@ -57,5 +62,21 @@ describe("DIRECTORY_DDL", () => {
   created_at INTEGER NOT NULL,
   archived_at INTEGER
 );`);
+  });
+
+  it("exports the allowed directory statuses", () => {
+    const statuses: readonly DirectoryStatus[] = [
+      "booting",
+      "live",
+      "archived",
+    ];
+
+    expect(DIRECTORY_STATUSES).toEqual(statuses);
+  });
+
+  it("exports the default temperament as JSON", () => {
+    expect(DEFAULT_TEMPERAMENT_JSON).toBe(
+      '{"branching":0.5,"persistence":0.5,"curiosity":0.5,"distance":0.5}',
+    );
   });
 });

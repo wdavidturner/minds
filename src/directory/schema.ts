@@ -1,5 +1,11 @@
-// status is one of: booting | live | archived
-// Default temperament JSON: {"branching":0.5,"persistence":0.5,"curiosity":0.5,"distance":0.5}
+import { DEFAULT_TEMPERAMENT } from "../defaults";
+
+export const DIRECTORY_STATUSES = ["booting", "live", "archived"] as const;
+
+export type DirectoryStatus = (typeof DIRECTORY_STATUSES)[number];
+
+export const DEFAULT_TEMPERAMENT_JSON = JSON.stringify(DEFAULT_TEMPERAMENT);
+
 export const DIRECTORY_DDL = `CREATE TABLE IF NOT EXISTS minds (
   slug TEXT PRIMARY KEY,
   name TEXT NOT NULL,
