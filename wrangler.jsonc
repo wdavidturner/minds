@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "minds",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-26",
+  "compatibility_flags": ["nodejs_compat", "experimental"],
+  "ai": {
+    "binding": "AI"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "Directory",
+        "class_name": "Directory"
+      },
+      {
+        "name": "Mind",
+        "class_name": "Mind"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Directory", "Mind"]
+    }
+  ],
+  "assets": {
+    "directory": "public",
+    "run_worker_first": true
+  }
+}

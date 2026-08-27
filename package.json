@@ -1,0 +1,25 @@
+{
+  "name": "minds",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types"
+  },
+  "dependencies": {
+    "@cloudflare/ai-chat": "0.10.2",
+    "@cloudflare/think": "0.16.0",
+    "agents": "0.21.0",
+    "ai": "7.0.83",
+    "workers-ai-provider": "4.0.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260827.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.126.0"
+  }
+}
