@@ -1,0 +1,61 @@
+import { describe, expect, it } from "vitest";
+import {
+  coreSummary,
+  validateCreate,
+  type CreateMindInput,
+} from "../src/directory/index-logic";
+import { DIRECTORY_DDL } from "../src/directory/schema";
+
+const validInput: CreateMindInput = {
+  slug: "ada",
+  name: "Ada",
+  persona: "",
+  core: "A thoughtful and curious mind.",
+};
+
+describe("validateCreate", () => {
+  it("rejects an invalid slug", () => {
+    expect(validateCreate({ ...validInput, slug: "Ada Mind" }, [])).toEqual({
+      ok: false,
+      error: "Invalid slug",
+    });
+  });
+
+  it("rejects an exact duplicate slug", () => {
+    expect(validateCreate(validInput, ["ada"])).toEqual({
+      ok: false,
+      error: "Slug already exists",
+    });
+  });
+
+  it.each([
+    ["name", { ...validInput, name: "  " }, "Name is required"],
+    ["core", { ...validInput, core: "\n\t" }, "Core is required"],
+  ])("rejects an empty %s", (_field, input, error) => {
+    expect(validateCreate(input, [])).toEqual({ ok: false, error });
+  });
+
+  it("allows an empty persona for a valid unique mind", () => {
+    expect(validateCreate(validInput, [])).toEqual({ ok: true });
+  });
+});
+
+describe("coreSummary", () => {
+  it("returns only the first 160 characters", () => {
+    expect(coreSummary(`${"a".repeat(160)}tail`)).toBe("a".repeat(160));
+  });
+});
+
+describe("DIRECTORY_DDL", () => {
+  it("defines the directory table schema", () => {
+    expect(DIRECTORY_DDL).toBe(`CREATE TABLE IF NOT EXISTS minds (
+  slug TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  core_summary TEXT NOT NULL,
+  temperament_json TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  archived_at INTEGER
+);`);
+  });
+});
