@@ -12,7 +12,7 @@ export type ThoughtRecord = {
 export type SessionStore = {
   snapshot(): MindSnapshot;
   startSession(brief: BriefType, lineageId: string | null): string;
-  recordThought(sessionId: string, thought: ThoughtRecord): string;
+  recordThought(sessionId: string, thought: ThoughtRecord): Promise<string>;
   apply(result: ApplyResult, sessionId: string): void;
   setWake(seconds: number): void;
   recentLine(lineageId: string | null): string;
@@ -82,7 +82,7 @@ export async function runSession(
 
     if (store.isAborted?.()) break;
 
-    store.recordThought(sessionId, step.thought);
+    await store.recordThought(sessionId, step.thought);
     count++;
     if (store.isWriteStopped?.()) break;
 

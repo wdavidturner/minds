@@ -38,7 +38,7 @@ function createStore(opts: { queued?: string[]; snapshot?: Partial<MindSnapshot>
     startSession() {
       return "session-1";
     },
-    recordThought(_sessionId, thoughtRecord) {
+    async recordThought(_sessionId, thoughtRecord) {
       state.thoughts.push(thoughtRecord);
       return `thought-${state.thoughts.length}`;
     },

@@ -212,9 +212,7 @@ export class Mind extends Think<Env> {
   }
 
   private async runPonderSession(): Promise<void> {
-    const store = new SqlStore(this.sql.bind(this), () => {
-      this.markStorageFull();
-    });
+    const store = new SqlStore(this.sql.bind(this), () => this.markStorageFull());
     store.clearAbort();
     await runSession(store, this.modelStep(store), Date.now);
     await this.workspace.writeFile("public/graph.json", JSON.stringify(this.graphPayload()));
@@ -363,9 +361,13 @@ export class Mind extends Think<Env> {
     return { storageFull: this.storageFull };
   }
 
-  private markStorageFull(): void {
+  private async markStorageFull(): Promise<void> {
     this.storageFull = true;
-    void this.ctx.storage.put("storage-full", true).catch(() => undefined);
+    try {
+      await this.ctx.storage.put("storage-full", true);
+    } catch {
+      // The in-memory indicator remains available when storage is full.
+    }
   }
 
   private graphPayload(): GraphPayload {

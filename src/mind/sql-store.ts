@@ -29,7 +29,7 @@ export class SqlStore implements SessionStore {
 
   constructor(
     private readonly sql: Sql,
-    private readonly onWriteStopped?: () => void,
+    private readonly onWriteStopped?: () => Promise<void>,
   ) {}
 
   private ensureWritable(): void {
@@ -90,7 +90,7 @@ export class SqlStore implements SessionStore {
     return sessionId;
   }
 
-  recordThought(sessionId: string, thought: ThoughtRecord): string {
+  async recordThought(sessionId: string, thought: ThoughtRecord): Promise<string> {
     this.ensureWritable();
     const session = this.sql<{ lineage_id: string }>`
       SELECT lineage_id FROM sessions WHERE id = ${sessionId}
@@ -116,7 +116,7 @@ export class SqlStore implements SessionStore {
       if (!isSqliteFull(error)) throw error;
       this.writeStopped = true;
       this.setWake(DEFAULTS.idleSleepSeconds * 10);
-      this.onWriteStopped?.();
+      await this.onWriteStopped?.();
     }
     return thoughtId;
   }

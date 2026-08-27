@@ -3,9 +3,10 @@ import { DEFAULTS } from "../src/defaults";
 import { SqlStore } from "../src/mind/sql-store";
 
 describe("SqlStore.recordThought", () => {
-  it("stops writes and schedules a long wake when storage is full", () => {
+  it("stops writes and persists the full marker before returning", async () => {
     let updatedSession = false;
     let queries = 0;
+    let markerPersisted = false;
     const sql = ((strings: TemplateStringsArray) => {
       queries++;
       const query = strings.join("");
@@ -14,9 +15,16 @@ describe("SqlStore.recordThought", () => {
       if (query.includes("UPDATE sessions")) updatedSession = true;
       return [];
     }) as never;
-    const store = new SqlStore(sql);
+    const store = new SqlStore(sql, () =>
+      new Promise((resolve) => {
+        setTimeout(() => {
+          markerPersisted = true;
+          resolve();
+        }, 0);
+      }),
+    );
 
-    store.recordThought("session-1", {
+    await store.recordThought("session-1", {
       body: "A thought that cannot be saved.",
       distanceToCore: 0,
       parentId: null,
@@ -25,15 +33,16 @@ describe("SqlStore.recordThought", () => {
     expect(store.isWriteStopped()).toBe(true);
     expect(store.wakeSeconds).toBe(DEFAULTS.idleSleepSeconds * 10);
     expect(updatedSession).toBe(false);
+    expect(markerPersisted).toBe(true);
     const queriesAfterFull = queries;
 
-    expect(() =>
+    await expect(
       store.recordThought("session-1", {
         body: "A second thought must not reach storage.",
         distanceToCore: 0,
         parentId: null,
       }),
-    ).toThrow("Writes are stopped");
+    ).rejects.toThrow("Writes are stopped");
     expect(queries).toBe(queriesAfterFull);
   });
 });
