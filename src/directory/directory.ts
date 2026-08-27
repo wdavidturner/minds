@@ -14,9 +14,8 @@ function statement(sql: (strings: TemplateStringsArray) => unknown, query: strin
 
 export class Directory extends Think<Env> {
   getModel() {
-    return createWorkersAI({ binding: this.env.AI })(
-      this.env.MODEL || "@cf/meta/llama-3.1-8b-instruct",
-    );
+    if (!this.env.MODEL) throw new Error("MODEL is required");
+    return createWorkersAI({ binding: this.env.AI })(this.env.MODEL);
   }
 
   getSystemPrompt(): string {

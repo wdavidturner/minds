@@ -32,9 +32,8 @@ function statement(sql: (strings: TemplateStringsArray) => unknown, query: strin
 
 export class Mind extends Think<Env> {
   getModel() {
-    return createWorkersAI({ binding: this.env.AI })(
-      this.env.MODEL || "@cf/meta/llama-3.1-8b-instruct",
-    );
+    if (!this.env.MODEL) throw new Error("MODEL is required");
+    return createWorkersAI({ binding: this.env.AI })(this.env.MODEL);
   }
 
   getSystemPrompt(): string {
@@ -115,6 +114,7 @@ export class Mind extends Think<Env> {
         execute: async ({ url }) => {
           try {
             const response = await fetch(url);
+            if (!response.ok) return { error: `Request failed: ${response.status}` };
             return { text: (await response.text()).slice(0, 20_000) };
           } catch (error) {
             return { error: String(error) };
