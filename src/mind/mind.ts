@@ -89,7 +89,8 @@ export class Mind extends Think<Env> {
     return "You are a Mind. You explore the core you were given through deliberate, concise thoughts.";
   }
 
-  onStart(): void {
+  async onStart(): Promise<void> {
+    this.storageFull = (await this.ctx.storage.get<boolean>("storage-full")) ?? false;
     for (const ddl of MIND_DDL.split(";").map((item) => item.trim()).filter(Boolean)) {
       statement(this.sql.bind(this), `${ddl};`);
     }
@@ -212,7 +213,7 @@ export class Mind extends Think<Env> {
 
   private async runPonderSession(): Promise<void> {
     const store = new SqlStore(this.sql.bind(this), () => {
-      this.storageFull = true;
+      this.markStorageFull();
     });
     store.clearAbort();
     await runSession(store, this.modelStep(store), Date.now);
@@ -360,6 +361,11 @@ export class Mind extends Think<Env> {
   @callable()
   storageStatus(): { storageFull: boolean } {
     return { storageFull: this.storageFull };
+  }
+
+  private markStorageFull(): void {
+    this.storageFull = true;
+    void this.ctx.storage.put("storage-full", true).catch(() => undefined);
   }
 
   private graphPayload(): GraphPayload {

@@ -32,6 +32,10 @@ export class SqlStore implements SessionStore {
     private readonly onWriteStopped?: () => void,
   ) {}
 
+  private ensureWritable(): void {
+    if (this.writeStopped) throw new Error("Writes are stopped after SQLITE_FULL");
+  }
+
   snapshot(): MindSnapshot {
     const identity = this.sql<{ paused: number }>`SELECT paused FROM identity LIMIT 1`[0];
     const activeLineage = this.sql<Lineage>`
@@ -71,6 +75,7 @@ export class SqlStore implements SessionStore {
   }
 
   startSession(brief: BriefType, lineageId: string | null): string {
+    this.ensureWritable();
     const coreId = this.sql<{ id: string }>`
       SELECT id FROM lineages WHERE kind = 'core' LIMIT 1
     `[0]?.id;
@@ -86,6 +91,7 @@ export class SqlStore implements SessionStore {
   }
 
   recordThought(sessionId: string, thought: ThoughtRecord): string {
+    this.ensureWritable();
     const session = this.sql<{ lineage_id: string }>`
       SELECT lineage_id FROM sessions WHERE id = ${sessionId}
     `[0];
@@ -116,6 +122,7 @@ export class SqlStore implements SessionStore {
   }
 
   apply(result: ApplyResult, sessionId: string): void {
+    this.ensureWritable();
     const now = Date.now();
     if (result.lineage) {
       if (result.lineage.status) {
@@ -198,6 +205,7 @@ export class SqlStore implements SessionStore {
   }
 
   createLineageFromSuggestion(suggestionId: string): string {
+    this.ensureWritable();
     const lineageId = id();
     this.sql`
       INSERT INTO lineages (
@@ -221,6 +229,7 @@ export class SqlStore implements SessionStore {
   }
 
   clearAbort(): void {
+    this.ensureWritable();
     this.sql`UPDATE flags SET abort_generation = 0`;
   }
 }
