@@ -193,4 +193,14 @@ export class SqlStore implements SessionStore {
       SELECT id FROM suggestions WHERE status = 'queued' ORDER BY created_at LIMIT 1
     `[0]?.id ?? null;
   }
+
+  isAborted(): boolean {
+    return this.sql<{ abort_generation: number }>`
+      SELECT abort_generation FROM flags LIMIT 1
+    `[0]?.abort_generation === 1;
+  }
+
+  clearAbort(): void {
+    this.sql`UPDATE flags SET abort_generation = 0`;
+  }
 }

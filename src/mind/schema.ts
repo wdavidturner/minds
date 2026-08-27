@@ -67,5 +67,6 @@ CREATE TABLE IF NOT EXISTS agenda_items (
 
 export const MIND_FLAGS_DDL = `CREATE TABLE IF NOT EXISTS flags (
   force_pending INTEGER NOT NULL DEFAULT 0,
-  talk_pending INTEGER NOT NULL DEFAULT 0
+  talk_pending INTEGER NOT NULL DEFAULT 0,
+  abort_generation INTEGER NOT NULL DEFAULT 0
 );`;

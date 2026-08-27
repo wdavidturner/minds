@@ -1,5 +1,5 @@
 import { Think, type TurnContext } from "@cloudflare/think";
-import { callable } from "agents";
+import { callable, type RetryOptions } from "agents";
 import { generateText, tool } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import { buildGraphPayload, type AgendaItemRow, type IdentityRow, type LineageRo
 import { MIND_DDL, MIND_FLAGS_DDL } from "./schema";
 import { SqlStore } from "./sql-store";
 import { runSession, type ModelStep, type ThoughtRecord } from "./session-loop";
+import { activeLineageOrFallback, type VerbLineage } from "./verbs";
 import type { BriefType, Outcome } from "../types";
 
 const outcomes = [
@@ -31,6 +32,8 @@ function statement(sql: (strings: TemplateStringsArray) => unknown, query: strin
 }
 
 export class Mind extends Think<Env> {
+  private ponderPromise: Promise<void> | undefined;
+
   getModel() {
     if (!this.env.MODEL) throw new Error("MODEL is required");
     return createWorkersAI({ binding: this.env.AI })(this.env.MODEL);
@@ -45,6 +48,11 @@ export class Mind extends Think<Env> {
       statement(this.sql.bind(this), `${ddl};`);
     }
     statement(this.sql.bind(this), MIND_FLAGS_DDL);
+    const hasAbortGeneration = this.sql<{ name: string }>`PRAGMA table_info(flags)`
+      .some((column) => column.name === "abort_generation");
+    if (!hasAbortGeneration) {
+      statement(this.sql.bind(this), "ALTER TABLE flags ADD COLUMN abort_generation INTEGER NOT NULL DEFAULT 0");
+    }
   }
 
   @callable()
@@ -71,20 +79,105 @@ export class Mind extends Think<Env> {
     return { ok: true };
   }
 
+  queue<T = unknown>(
+    callback: keyof this,
+    payload: T,
+    options?: { retry?: RetryOptions },
+  ): Promise<string>;
+  queue(text: string): Promise<{ id: string }>;
+  @callable()
+  async queue<T = unknown>(
+    callbackOrText: (keyof this) | string,
+    payload?: T,
+    options?: { retry?: RetryOptions },
+  ): Promise<string | { id: string }> {
+    if (typeof callbackOrText !== "string" || arguments.length > 1) {
+      return super.queue(callbackOrText as keyof this, payload, options);
+    }
+
+    const id = crypto.randomUUID();
+    this.sql`
+      INSERT INTO suggestions (id, text, status, created_at, lineage_id)
+      VALUES (${id}, ${callbackOrText}, 'queued', ${Date.now()}, NULL)
+    `;
+    return { id };
+  }
+
+  @callable()
+  async force(text: string): Promise<void> {
+    this.abortGeneration();
+    const suggestionId = crypto.randomUUID();
+    const lineageId = crypto.randomUUID();
+    const activeLineageId = new SqlStore(this.sql.bind(this)).activeLineageId();
+    const now = Date.now();
+    this.sql`
+      INSERT INTO suggestions (id, text, status, created_at, lineage_id)
+      VALUES (${suggestionId}, ${text}, 'selected', ${now}, ${lineageId})
+    `;
+    this.sql`
+      INSERT INTO lineages (
+        id, kind, suggestion_id, status, stashed_from_lineage_id, dig_sessions, created_at, closed_at
+      ) VALUES (${lineageId}, 'suggestion', ${suggestionId}, 'relating', ${activeLineageId}, 0, ${now}, NULL)
+    `;
+    this.sql`UPDATE flags SET force_pending = 1`;
+    if (this.ponderPromise) await this.ponderPromise;
+    await this.runPonder();
+  }
+
+  @callable()
+  async talk(text: string): Promise<void> {
+    const target = activeLineageOrFallback(this.lineagesForTalk());
+    this.sql`
+      INSERT INTO utterances (id, lineage_id, text, created_at, consumed_at)
+      VALUES (${crypto.randomUUID()}, ${target.id}, ${text}, ${Date.now()}, NULL)
+    `;
+    this.sql`UPDATE flags SET talk_pending = 1`;
+    this.abortGeneration();
+    if (this.ponderPromise) await this.ponderPromise;
+    await this.runPonder();
+  }
+
+  @callable()
+  async pause(): Promise<void> {
+    this.sql`UPDATE identity SET paused = 1`;
+  }
+
+  @callable()
+  async resume(): Promise<void> {
+    this.sql`UPDATE identity SET paused = 0`;
+    await this.schedule(DEFAULTS.hotSleepSeconds, "runPonder", {});
+  }
+
   @callable()
   async runPonder(): Promise<void> {
     if (this.sql<{ paused: number }>`SELECT paused FROM identity LIMIT 1`[0]?.paused === 1) {
       return;
     }
+    if (this.ponderPromise) return this.ponderPromise;
 
+    const ponder = this.runPonderSession();
+    this.ponderPromise = ponder;
+    try {
+      await ponder;
+    } finally {
+      if (this.ponderPromise === ponder) this.ponderPromise = undefined;
+    }
+  }
+
+  private async runPonderSession(): Promise<void> {
     const store = new SqlStore(this.sql.bind(this));
+    store.clearAbort();
     await runSession(store, this.modelStep(store), Date.now);
     await this.workspace.writeFile("public/graph.json", JSON.stringify(this.graphPayload()));
     await this.schedule(store.wakeSeconds, "runPonder", {});
   }
 
-  beforeTurn(_ctx: TurnContext): void {
-    // Human-chat behavior is intentionally deferred to Task 9.
+  async beforeTurn(ctx: TurnContext): Promise<{ maxSteps: number } | void> {
+    if (ctx.continuation) return;
+    const text = this.latestUserText(ctx.messages);
+    if (!text) return;
+    await this.talk(text);
+    return { maxSteps: 0 };
   }
 
   getTools() {
@@ -219,5 +312,41 @@ export class Mind extends Think<Env> {
       this.sql<ThoughtRow>`SELECT * FROM thoughts ORDER BY created_at`,
       this.sql<AgendaItemRow>`SELECT * FROM agenda_items`,
     );
+  }
+
+  private abortGeneration(): void {
+    this.sql`UPDATE flags SET abort_generation = 1`;
+  }
+
+  private lineagesForTalk(): VerbLineage[] {
+    const activeLineageId = new SqlStore(this.sql.bind(this)).activeLineageId();
+    return this.sql<VerbLineage & { created_at: number }>`
+      SELECT id, kind, status, created_at, created_at AS createdAt
+      FROM lineages
+    `.map((lineage) => ({
+      id: lineage.id,
+      kind: lineage.kind,
+      status: lineage.status,
+      createdAt: lineage.created_at,
+      active: lineage.id === activeLineageId,
+    }));
+  }
+
+  private latestUserText(messages: unknown): string | undefined {
+    if (!Array.isArray(messages)) return;
+    for (const message of [...messages].reverse()) {
+      if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "user") continue;
+      const content = (message as { content?: unknown }).content;
+      if (typeof content === "string") return content;
+      if (!Array.isArray(content)) continue;
+      const text = content
+        .filter((part): part is { type: "text"; text: string } =>
+          !!part && typeof part === "object" && (part as { type?: unknown }).type === "text"
+            && typeof (part as { text?: unknown }).text === "string")
+        .map((part) => part.text)
+        .join("");
+      if (text) return text;
+    }
+    return;
   }
 }

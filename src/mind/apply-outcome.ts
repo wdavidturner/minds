@@ -20,6 +20,7 @@ export type ApplyResult = {
 
 export function applyOutcome({
   outcome,
+  brief,
   activeLineageId,
   agendaTexts,
 }: {
@@ -28,39 +29,49 @@ export function applyOutcome({
   activeLineageId: string | null;
   agendaTexts?: string[];
 }): ApplyResult {
+  const pending = brief === "relate"
+    ? { clearForce: true }
+    : brief === "talk"
+      ? { clearTalk: true }
+      : {};
+  const finish = (result: Omit<ApplyResult, "clearForce" | "clearTalk">): ApplyResult => ({
+    ...result,
+    ...pending,
+  });
+
   switch (outcome) {
     case "continue_line":
-      return { lineage: null, wakeHot: true };
+      return finish({ lineage: null, wakeHot: true });
     case "expand":
-      return { lineage: null, agendaTexts, wakeHot: true };
+      return finish({ lineage: null, agendaTexts, wakeHot: true });
     case "conclude":
-      return {
+      return finish({
         lineage:
           activeLineageId === null
             ? null
             : { id: activeLineageId, status: "concluded", closed: true },
         wakeHot: false,
-      };
+      });
     case "park":
-      return {
+      return finish({
         lineage:
           activeLineageId === null
             ? null
             : { id: activeLineageId, status: "parked", closed: true },
         wakeHot: false,
-      };
+      });
     case "noop":
-      return { lineage: null, wakeHot: false };
+      return finish({ lineage: null, wakeHot: false });
     case "connected":
-      return {
+      return finish({
         lineage:
           activeLineageId === null
             ? null
             : { id: activeLineageId, status: "connected" },
         wakeHot: true,
-      };
+      });
     case "unrelated":
-      return {
+      return finish({
         lineage:
           activeLineageId === null
             ? null
@@ -71,9 +82,9 @@ export function applyOutcome({
                 restoreStash: true,
               },
         wakeHot: false,
-      };
+      });
     case "dig":
-      return {
+      return finish({
         lineage:
           activeLineageId === null
             ? null
@@ -83,11 +94,11 @@ export function applyOutcome({
                 digSessions: 1,
               },
         wakeHot: true,
-      };
+      });
     case "select_suggestion":
-      return { lineage: null, nextBriefHint: "relate", wakeHot: true };
+      return finish({ lineage: null, nextBriefHint: "relate", wakeHot: true });
     case "ignore_inbox":
-      return { lineage: null, nextBriefHint: "grow_frontier", wakeHot: true };
+      return finish({ lineage: null, nextBriefHint: "grow_frontier", wakeHot: true });
   }
 }
 

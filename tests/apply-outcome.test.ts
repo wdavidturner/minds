@@ -59,6 +59,14 @@ describe("applyOutcome", () => {
     expect(r.nextBriefHint).toBe("relate");
     expect(r.wakeHot).toBe(true);
   });
+  it("clears pending force and talk flags after their respective briefs", () => {
+    expect(
+      applyOutcome({ outcome: "connected", brief: "relate", activeLineageId: "probe" }).clearForce,
+    ).toBe(true);
+    expect(
+      applyOutcome({ outcome: "continue_line", brief: "talk", activeLineageId: "core" }).clearTalk,
+    ).toBe(true);
+  });
 });
 
 describe("nextWakeSeconds", () => {

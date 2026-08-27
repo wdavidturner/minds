@@ -154,4 +154,19 @@ describe("runSession", () => {
     expect(result.outcome).toBe("noop");
     expect(state.wake).toBe(720);
   });
+
+  it("exits with continue_line before the minimum thought count when aborted", async () => {
+    const { store, state } = createStore();
+    store.isAborted = () => true;
+    const model: ModelStep = async () => {
+      throw new Error("model should not run after an abort");
+    };
+
+    const result = await runSession(store, model, () => 0, { minThoughts: 3 });
+
+    expect(result.thoughtCount).toBe(0);
+    expect(result.outcome).toBe("continue_line");
+    expect(state.applied).toHaveLength(1);
+    expect(state.applied[0]?.result.wakeHot).toBe(true);
+  });
 });

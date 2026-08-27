@@ -20,6 +20,7 @@ export type SessionStore = {
   activeLineageId(): string | null;
   createLineageFromSuggestion(suggestionId: string): string;
   pickQueuedSuggestionId(): string | null;
+  isAborted?(): boolean;
 };
 
 export type ModelStep = (input: {
@@ -57,6 +58,8 @@ export async function runSession(
   let count = 0;
 
   while (true) {
+    if (store.isAborted?.()) break;
+
     const elapsedMs = now() - start;
     const remainingMs = alarmWallMs - elapsedMs;
     const windDown = remainingMs <= windDownMs;
@@ -75,6 +78,8 @@ export async function runSession(
       remainingMs,
       windDown,
     });
+
+    if (store.isAborted?.()) break;
 
     store.recordThought(sessionId, step.thought);
     count++;
