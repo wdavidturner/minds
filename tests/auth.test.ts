@@ -79,4 +79,8 @@ describe("operatorCookieHeader", () => {
     expect(header).toContain("operator=secret");
     expect(header).toContain("Path=/");
   });
+
+  it("sets SameSite so the cookie is not sent cross-site", () => {
+    expect(operatorCookieHeader("secret")).toMatch(/SameSite=Lax/i);
+  });
 });

@@ -67,6 +67,80 @@ describe("applyOutcome", () => {
       applyOutcome({ outcome: "continue_line", brief: "talk", activeLineageId: "core" }).clearTalk,
     ).toBe(true);
   });
+
+  it("carries the outcome for session-ending outcomes so it can be persisted", () => {
+    expect(applyOutcome({ outcome: "conclude", brief: "continue_line", activeLineageId: "probe" }).outcome).toBe(
+      "conclude",
+    );
+    expect(applyOutcome({ outcome: "continue_line", brief: "continue_line", activeLineageId: null }).outcome).toBe(
+      "continue_line",
+    );
+  });
+
+  it("omits the outcome for select_suggestion/ignore_inbox, which do not end the session", () => {
+    expect(
+      applyOutcome({ outcome: "select_suggestion", brief: "inbox_glance", activeLineageId: null }).outcome,
+    ).toBeUndefined();
+    expect(
+      applyOutcome({ outcome: "ignore_inbox", brief: "inbox_glance", activeLineageId: null }).outcome,
+    ).toBeUndefined();
+  });
+
+  it("conclude/park inside pursue_agenda close the agenda item, not the lineage", () => {
+    const concluded = applyOutcome({
+      outcome: "conclude",
+      brief: "pursue_agenda",
+      activeLineageId: "core",
+    });
+    expect(concluded.lineage).toBeNull();
+    expect(concluded.agendaItemDone).toBe(true);
+    expect(concluded.outcome).toBe("conclude");
+
+    const parked = applyOutcome({
+      outcome: "park",
+      brief: "pursue_agenda",
+      activeLineageId: "core",
+    });
+    expect(parked.lineage).toBeNull();
+    expect(parked.agendaItemDone).toBe(true);
+  });
+
+  it("guards the core lineage against conclude/park/unrelated closing it", () => {
+    const concluded = applyOutcome({
+      outcome: "conclude",
+      brief: "continue_line",
+      activeLineageId: "core-1",
+      activeLineageKind: "core",
+    });
+    expect(concluded.lineage).toBeNull();
+
+    const parked = applyOutcome({
+      outcome: "park",
+      brief: "continue_line",
+      activeLineageId: "core-1",
+      activeLineageKind: "core",
+    });
+    expect(parked.lineage).toBeNull();
+
+    const unrelated = applyOutcome({
+      outcome: "unrelated",
+      brief: "relate",
+      activeLineageId: "core-1",
+      activeLineageKind: "core",
+    });
+    expect(unrelated.lineage).toBeNull();
+  });
+
+  it("still closes a non-core lineage on conclude/park/unrelated", () => {
+    expect(
+      applyOutcome({
+        outcome: "conclude",
+        brief: "continue_line",
+        activeLineageId: "probe",
+        activeLineageKind: "suggestion",
+      }).lineage,
+    ).toEqual({ id: "probe", status: "concluded", closed: true });
+  });
 });
 
 describe("nextWakeSeconds", () => {

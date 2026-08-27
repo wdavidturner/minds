@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   coreSummary,
+  partitionExistingSlugs,
   validateCreate,
   type CreateMindInput,
 } from "../src/directory/index-logic";
@@ -42,6 +43,36 @@ describe("validateCreate", () => {
 
   it("allows an empty persona for a valid unique mind", () => {
     expect(validateCreate(validInput, [])).toEqual({ ok: true });
+  });
+});
+
+describe("partitionExistingSlugs", () => {
+  it("does not block a retry of a slug still booting", () => {
+    const rows = [{ slug: "ada", status: "booting" }];
+    expect(partitionExistingSlugs(rows, "ada")).toEqual({
+      retryingBoot: true,
+      blockingSlugs: [],
+    });
+  });
+
+  it("blocks a live or archived slug from being reused", () => {
+    expect(
+      partitionExistingSlugs([{ slug: "ada", status: "live" }], "ada"),
+    ).toEqual({ retryingBoot: false, blockingSlugs: ["ada"] });
+    expect(
+      partitionExistingSlugs([{ slug: "ada", status: "archived" }], "ada"),
+    ).toEqual({ retryingBoot: false, blockingSlugs: ["ada"] });
+  });
+
+  it("leaves unrelated slugs blocking regardless of status", () => {
+    const rows = [
+      { slug: "ada", status: "booting" },
+      { slug: "grace", status: "live" },
+    ];
+    expect(partitionExistingSlugs(rows, "ada")).toEqual({
+      retryingBoot: true,
+      blockingSlugs: ["grace"],
+    });
   });
 });
 
