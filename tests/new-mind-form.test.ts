@@ -9,5 +9,7 @@ describe("newMindFields", () => {
     expect(html).toContain('name="name"');
     expect(html).toContain('name="persona"');
     expect(html).toContain('name="core"');
+    expect(html).toContain('name="model"');
+    expect(html).toContain("@cf/zai-org/glm-5.3-flash");
   });
 });

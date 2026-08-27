@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { CreateMindInput } from "../directory/index-logic";
 import { DEFAULTS, DEFAULT_TEMPERAMENT } from "../defaults";
 import type { Env } from "../env";
+import { isAllowedModel, resolveMindModel } from "../models";
 import {
   buildGraphPayload,
   type AgendaItemRow,
@@ -17,6 +18,7 @@ import {
   type SessionRow,
   type ThoughtRow,
 } from "./graph";
+import { decideBrief } from "./brief";
 import { buildPonderPrompt } from "./prompt";
 import { MIND_DDL, MIND_FLAGS_DDL } from "./schema";
 import { SqlStore } from "./sql-store";
@@ -86,7 +88,8 @@ export class Mind extends Think<Env> {
 
   getModel() {
     if (!this.env.MODEL) throw new Error("MODEL is required");
-    return createWorkersAI({ binding: this.env.AI })(this.env.MODEL);
+    const stored = this.sql<{ model: string | null }>`SELECT model FROM identity LIMIT 1`[0]?.model;
+    return createWorkersAI({ binding: this.env.AI })(resolveMindModel(stored, this.env.MODEL));
   }
 
   getSystemPrompt(): string {
@@ -104,6 +107,11 @@ export class Mind extends Think<Env> {
     if (!hasAbortGeneration) {
       statement(this.sql.bind(this), "ALTER TABLE flags ADD COLUMN abort_generation INTEGER NOT NULL DEFAULT 0");
     }
+    const hasModel = this.sql<{ name: string }>`PRAGMA table_info(identity)`
+      .some((column) => column.name === "model");
+    if (!hasModel) {
+      statement(this.sql.bind(this), "ALTER TABLE identity ADD COLUMN model TEXT");
+    }
   }
 
   @callable()
@@ -113,11 +121,12 @@ export class Mind extends Think<Env> {
     }
 
     const now = Date.now();
+    const model = input.model && isAllowedModel(input.model) ? input.model : null;
     this.sql`
-      INSERT INTO identity (slug, name, persona, core, temperament_json, paused, created_at)
+      INSERT INTO identity (slug, name, persona, core, temperament_json, paused, created_at, model)
       VALUES (
         ${input.slug}, ${input.name}, ${input.persona}, ${input.core},
-        ${JSON.stringify(DEFAULT_TEMPERAMENT)}, 0, ${now}
+        ${JSON.stringify(DEFAULT_TEMPERAMENT)}, 0, ${now}, ${model}
       )
     `;
     this.sql`
@@ -200,6 +209,14 @@ export class Mind extends Think<Env> {
   }
 
   @callable()
+  async setModel(model: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const value = model.trim();
+    if (value && !isAllowedModel(value)) return { ok: false, error: "Unknown model" };
+    this.sql`UPDATE identity SET model = ${value || null}`;
+    return { ok: true };
+  }
+
+  @callable()
   async runPonder(): Promise<void> {
     if (this.sql<{ paused: number }>`SELECT paused FROM identity LIMIT 1`[0]?.paused === 1) {
       return;
@@ -216,7 +233,11 @@ export class Mind extends Think<Env> {
   }
 
   private async runPonderSession(): Promise<void> {
-    const store = new SqlStore(this.sql.bind(this), () => this.markStorageFull());
+    const store = new SqlStore(
+      this.sql.bind(this),
+      () => this.markStorageFull(),
+      () => this.publishGraph(true),
+    );
     store.clearAbort();
     const controller = new AbortController();
     this.currentAbortController = controller;
@@ -232,11 +253,7 @@ export class Mind extends Think<Env> {
       if (this.currentAbortController === controller) this.currentAbortController = undefined;
     }
 
-    try {
-      await this.workspace.writeFile("public/graph.json", JSON.stringify(this.graphPayload()));
-    } catch (error) {
-      console.error("Mind graph publish failed:", error);
-    }
+    await this.publishGraph(false);
 
     await this.schedule(store.wakeSeconds || DEFAULTS.idleSleepSeconds, "runPonder", {});
   }
@@ -420,6 +437,47 @@ export class Mind extends Think<Env> {
   }
 
   @callable()
+  operatorView() {
+    const store = new SqlStore(this.sql.bind(this));
+    const snapshot = store.snapshot();
+    const lastSession = this.sql<{
+      brief_type: string;
+      outcome: string | null;
+      thought_count: number;
+    }>`
+      SELECT brief_type, outcome, thought_count
+      FROM sessions
+      ORDER BY started_at DESC
+      LIMIT 1
+    `[0];
+    const inbox = this.sql<{ text: string }>`
+      SELECT text FROM suggestions WHERE status = 'queued' ORDER BY created_at
+    `.map((row) => row.text);
+
+    const identity = this.sql<IdentityRow>`SELECT * FROM identity LIMIT 1`[0];
+    return {
+      paused: snapshot.paused,
+      pondering: this.ponderPromise !== undefined,
+      storageFull: this.storageFull,
+      nextBrief: decideBrief(snapshot),
+      queuedCount: snapshot.queuedCount,
+      inbox,
+      activeLineage: snapshot.activeLineage
+        ? { kind: snapshot.activeLineage.kind, status: snapshot.activeLineage.status }
+        : null,
+      lastSession: lastSession
+        ? {
+            briefType: lastSession.brief_type,
+            outcome: lastSession.outcome,
+            thoughtCount: lastSession.thought_count,
+          }
+        : null,
+      model: resolveMindModel(identity?.model, this.env.MODEL),
+      modelOverride: identity?.model ?? "",
+    };
+  }
+
+  @callable()
   async publicNotes(): Promise<{ id: string }[]> {
     try {
       const files = await this.workspace.readDir("public/notes");
@@ -449,14 +507,29 @@ export class Mind extends Think<Env> {
     }
   }
 
-  private graphPayload(): GraphPayload {
-    return buildGraphPayload(
-      this.sql<IdentityRow>`SELECT * FROM identity`,
-      this.sql<LineageRow>`SELECT * FROM lineages ORDER BY created_at`,
-      this.sql<SessionRow>`SELECT * FROM sessions ORDER BY started_at`,
-      this.sql<ThoughtRow>`SELECT * FROM thoughts ORDER BY created_at`,
-      this.sql<AgendaItemRow>`SELECT * FROM agenda_items`,
-    );
+  private async publishGraph(pondering: boolean): Promise<void> {
+    try {
+      await this.workspace.writeFile("public/graph.json", JSON.stringify(this.graphPayload(pondering)));
+    } catch (error) {
+      console.error("Mind graph publish failed:", error);
+    }
+  }
+
+  private graphPayload(pondering = this.ponderPromise !== undefined): GraphPayload {
+    const identityRows = this.sql<IdentityRow>`SELECT * FROM identity`;
+    const identity = identityRows[0];
+    return {
+      ...buildGraphPayload(
+        identityRows,
+        this.sql<LineageRow>`SELECT * FROM lineages ORDER BY created_at`,
+        this.sql<SessionRow>`SELECT * FROM sessions ORDER BY started_at`,
+        this.sql<ThoughtRow>`SELECT * FROM thoughts ORDER BY created_at`,
+        this.sql<AgendaItemRow>`SELECT * FROM agenda_items`,
+      ),
+      model: resolveMindModel(identity?.model, this.env.MODEL),
+      pondering,
+      paused: identity?.paused === 1,
+    };
   }
 
   private abortGeneration(): void {

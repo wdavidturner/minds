@@ -13,6 +13,7 @@ export type IdentityRow = {
   temperament_json: string;
   paused: number;
   created_at: number;
+  model?: string | null;
 };
 
 export type LineageRow = {
@@ -60,6 +61,9 @@ export type GraphPayload = {
   slug: string;
   name: string;
   core: string;
+  model?: string;
+  pondering?: boolean;
+  paused?: boolean;
   lineages: LineageRow[];
   sessions: SessionRow[];
   thoughts: ThoughtRow[];

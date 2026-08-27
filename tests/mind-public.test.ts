@@ -58,11 +58,47 @@ const graph: GraphPayload = {
       thought_count: 3,
     },
   ],
-  thoughts: [],
-  agenda: [],
+  thoughts: [
+    {
+      id: "t-1",
+      session_id: "session-1",
+      lineage_id: "core-1",
+      suggestion_id: null,
+      parent_id: null,
+      body: "Families keep a shared calendar for a reason.",
+      distance_to_core: 0.1,
+      created_at: 5,
+    },
+  ],
+  agenda: [
+    {
+      id: "a-1",
+      lineage_id: "core-1",
+      origin_session_id: "session-1",
+      origin_thought_id: "t-1",
+      text: "Who holds the weekly plan?",
+      status: "pending",
+    },
+  ],
+  model: "@cf/zai-org/glm-4.7-flash",
+  pondering: true,
+  paused: false,
 };
 
 describe("mindPublic", () => {
+  it("shows a live dashboard with exploring, next, stream, and dead ends", () => {
+    const html = mindPublic(graph);
+    expect(html).toContain("data-mind-dashboard");
+    expect(html).toContain("/minds/ada.json");
+    expect(html).toContain("/mind-dashboard.js");
+    expect(html).toContain("Now exploring");
+    expect(html).toContain("Up next");
+    expect(html).toContain("Thought stream");
+    expect(html).toContain("Who holds the weekly plan?");
+    expect(html).toContain("Families keep a shared calendar for a reason.");
+    expect(html).toContain("core — exploring");
+  });
+
   it("shows every lineage including unrelated and parked dead ends", () => {
     const html = mindPublic(graph);
     expect(html).toContain("unrelated");

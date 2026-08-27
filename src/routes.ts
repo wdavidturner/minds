@@ -2,12 +2,13 @@ export type Route =
   | { kind: "gallery" }
   | { kind: "login" }
   | { kind: "mind-public"; slug: string }
+  | { kind: "mind-graph"; slug: string }
   | { kind: "mind-op"; slug: string }
   | { kind: "mind-note"; slug: string; noteId: string }
   | { kind: "op-new" }
   | { kind: "op-directory" }
   | { kind: "op-directory-chat" }
-  | { kind: "mind-action"; slug: string; action: "queue" | "force" | "talk" | "pause" | "resume" }
+  | { kind: "mind-action"; slug: string; action: "queue" | "force" | "talk" | "pause" | "resume" | "model" }
   | { kind: "unknown" };
 
 export function matchRoute(pathname: string): Route {
@@ -26,6 +27,11 @@ export function matchRoute(pathname: string): Route {
     };
   }
 
+  const graphMatch = /^\/minds\/([^/]+)\.json$/.exec(pathname);
+  if (graphMatch) {
+    return { kind: "mind-graph", slug: decodeURIComponent(graphMatch[1]) };
+  }
+
   const mindMatch = /^\/minds\/([^/]+)(\/op)?$/.exec(pathname);
   if (mindMatch) {
     const slug = decodeURIComponent(mindMatch[1]);
@@ -34,12 +40,12 @@ export function matchRoute(pathname: string): Route {
       : { kind: "mind-public", slug };
   }
 
-  const actionMatch = /^\/op\/minds\/([^/]+)\/(queue|force|talk|pause|resume)$/.exec(pathname);
+  const actionMatch = /^\/op\/minds\/([^/]+)\/(queue|force|talk|pause|resume|model)$/.exec(pathname);
   if (actionMatch) {
     return {
       kind: "mind-action",
       slug: decodeURIComponent(actionMatch[1]),
-      action: actionMatch[2] as "queue" | "force" | "talk" | "pause" | "resume",
+      action: actionMatch[2] as "queue" | "force" | "talk" | "pause" | "resume" | "model",
     };
   }
 

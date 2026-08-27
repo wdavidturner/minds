@@ -14,7 +14,7 @@ npx wrangler secret put OPERATOR_TOKEN
 npm run deploy
 ```
 
-The configured Workers AI model is `@cf/meta/llama-3.1-8b-instruct`.
+The configured Workers AI model is `@cf/zai-org/glm-4.7-flash`. Each Mind can pick a different allowlisted model from the operator page, including GLM 5.3 Flash.
 
 ## Generate Wrangler types
 

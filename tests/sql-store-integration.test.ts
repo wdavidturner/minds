@@ -233,3 +233,17 @@ describe("SqlStore agenda item status transitions", () => {
     expect(session2).not.toBe(sessionId);
   });
 });
+
+describe("SqlStore thought publish hook", () => {
+  it("calls onThought after a thought is recorded", async () => {
+    const { sql, bootstrap } = createMindDb();
+    bootstrap();
+    const calls: number[] = [];
+    const store = new SqlStore(sql, undefined, async () => {
+      calls.push(1);
+    });
+    const sessionId = store.startSession("continue_line", "core-1");
+    await store.recordThought(sessionId, thought("A live thought."));
+    expect(calls).toHaveLength(1);
+  });
+});

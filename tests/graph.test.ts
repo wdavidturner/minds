@@ -145,7 +145,8 @@ describe("MIND_DDL", () => {
   core TEXT NOT NULL,
   temperament_json TEXT NOT NULL,
   paused INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  model TEXT
 );
 
 CREATE TABLE IF NOT EXISTS suggestions (

@@ -44,6 +44,24 @@ describe("validateCreate", () => {
   it("allows an empty persona for a valid unique mind", () => {
     expect(validateCreate(validInput, [])).toEqual({ ok: true });
   });
+
+  it("allows an omitted or empty model override", () => {
+    expect(validateCreate(validInput, [])).toEqual({ ok: true });
+    expect(validateCreate({ ...validInput, model: "" }, [])).toEqual({ ok: true });
+  });
+
+  it("allows an allowlisted model override", () => {
+    expect(validateCreate({ ...validInput, model: "@cf/zai-org/glm-5.3-flash" }, [])).toEqual({
+      ok: true,
+    });
+  });
+
+  it("rejects an unknown model override", () => {
+    expect(validateCreate({ ...validInput, model: "gpt-4" }, [])).toEqual({
+      ok: false,
+      error: "Unknown model",
+    });
+  });
 });
 
 describe("partitionExistingSlugs", () => {

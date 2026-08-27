@@ -1,5 +1,6 @@
 import { getAgentByName, routeAgentRequest } from "agents";
 import { isOperator, operatorCookieHeader, unauthorized } from "./auth";
+import { directoryDashboard } from "./html/directory-dashboard";
 import { gallery, type MindCard } from "./html/gallery";
 import { login } from "./html/login";
 import { mindOperator } from "./html/mind-op";
@@ -42,18 +43,6 @@ function turnResultText(result: TurnResultLike): string {
     .map((part) => part.text)
     .join("");
   return text || "(no response)";
-}
-
-function directoryPage(): string {
-  return layout(
-    "Directory",
-    `<h1>Directory</h1>
-${newMindForm()}
-<form method="post" action="/op/directory/chat">
-  <label>Message <textarea name="input" required></textarea></label>
-  <button>Send</button>
-</form>`,
-  );
 }
 
 async function directory(env: Env) {
@@ -108,6 +97,15 @@ export default {
       });
     }
 
+    if (route.kind === "mind-graph" && request.method === "GET") {
+      if (!(await knownMind(route.slug, env))) return new Response("Not found", { status: 404 });
+      const mind = await getAgentByName(env.Mind, route.slug);
+      const graph = await mind.publicGraph();
+      return new Response(JSON.stringify(graph), {
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
+    }
+
     if (route.kind === "mind-note" && request.method === "GET") {
       if (!(await knownMind(route.slug, env))) return new Response("Not found", { status: 404 });
       const mind = await getAgentByName(env.Mind, route.slug);
@@ -121,15 +119,15 @@ export default {
     if (route.kind === "mind-op" && request.method === "GET") {
       if (!(await knownMind(route.slug, env))) return new Response("Not found", { status: 404 });
       const mind = await getAgentByName(env.Mind, route.slug);
-      const { storageFull } = await mind.storageStatus();
-      return new Response(mindOperator(route.slug, storageFull), {
+      const view = await mind.operatorView();
+      return new Response(mindOperator(route.slug, view), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     }
 
     if (route.kind === "op-new") {
       if (request.method === "GET") {
-        return new Response(layout("New Mind", `<h1>New Mind</h1>${newMindForm()}`), {
+        return new Response(layout("New Mind", `<p><a href="/op/directory">Directory</a></p><h1>New Mind</h1>${newMindForm()}`), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       }
@@ -141,6 +139,7 @@ export default {
           name: formText(formData, "name"),
           persona: formText(formData, "persona"),
           core: formText(formData, "core"),
+          model: formText(formData, "model") || undefined,
         });
         if (!result.ok) return new Response(result.error, { status: 400 });
         return redirect(`/minds/${encodeURIComponent(slug)}/op`);
@@ -148,7 +147,8 @@ export default {
     }
 
     if (route.kind === "op-directory" && request.method === "GET") {
-      return new Response(directoryPage(), {
+      const minds = (await (await directory(env)).listMinds()) as unknown as MindCard[];
+      return new Response(directoryDashboard(minds), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     }
@@ -171,6 +171,10 @@ export default {
       if (route.action === "talk") await mind.talk(formText(formData, "text"));
       if (route.action === "pause") await mind.pause();
       if (route.action === "resume") await mind.resume();
+      if (route.action === "model") {
+        const result = await mind.setModel(formText(formData, "model"));
+        if (!result.ok) return new Response(result.error, { status: 400 });
+      }
       return redirect(`/minds/${encodeURIComponent(route.slug)}/op`);
     }
 

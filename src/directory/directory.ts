@@ -32,6 +32,7 @@ export class Directory extends Think<Env> {
     name: string;
     persona: string;
     core: string;
+    model?: string;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
     const rows = this.sql<{ slug: string; status: string }>`SELECT slug, status FROM minds`;
     const { retryingBoot, blockingSlugs } = partitionExistingSlugs(rows, input.slug);
@@ -82,6 +83,7 @@ export class Directory extends Think<Env> {
           name: z.string(),
           persona: z.string(),
           core: z.string(),
+          model: z.string().optional(),
         }),
         execute: (input) => this.createMind(input),
       }),

@@ -5,7 +5,7 @@
   "compatibility_date": "2026-08-26",
   "compatibility_flags": ["nodejs_compat", "experimental"],
   "vars": {
-    "MODEL": "@cf/meta/llama-3.1-8b-instruct"
+    "MODEL": "@cf/zai-org/glm-4.7-flash"
   },
   "ai": {
     "binding": "AI"
@@ -32,5 +32,15 @@
     "directory": "public",
     "binding": "ASSETS",
     "run_worker_first": true
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": true
+    }
   }
 }

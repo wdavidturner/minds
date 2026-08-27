@@ -31,6 +31,7 @@ export class SqlStore implements SessionStore {
   constructor(
     private readonly sql: Sql,
     private readonly onWriteStopped?: () => Promise<void>,
+    private readonly onThought?: () => Promise<void>,
   ) {}
 
   private ensureWritable(): void {
@@ -140,6 +141,11 @@ export class SqlStore implements SessionStore {
         SET thought_count = thought_count + 1, ended_at = ${Date.now()}
         WHERE id = ${sessionId}
       `;
+      try {
+        await this.onThought?.();
+      } catch {
+        // Publishing the public graph is best-effort and must not unwind the thought.
+      }
     } catch (error) {
       if (!isSqliteFull(error)) throw error;
       this.writeStopped = true;

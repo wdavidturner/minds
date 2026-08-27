@@ -1,10 +1,12 @@
 import { isValidSlug } from "../slug";
+import { isAllowedModel } from "../models";
 
 export type CreateMindInput = {
   slug: string;
   name: string;
   persona: string;
   core: string;
+  model?: string;
 };
 
 export function coreSummary(core: string): string {
@@ -45,6 +47,10 @@ export function validateCreate(
 
   if (!input.core.trim()) {
     return { ok: false, error: "Core is required" };
+  }
+
+  if (input.model && !isAllowedModel(input.model)) {
+    return { ok: false, error: "Unknown model" };
   }
 
   return { ok: true };
