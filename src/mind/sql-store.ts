@@ -3,6 +3,7 @@ import { decideBrief } from "./brief";
 import type { SessionStore, ThoughtRecord } from "./session-loop";
 import { DEFAULTS } from "../defaults";
 import type { BriefType, LineageKind, LineageStatus, MindSnapshot } from "../types";
+import { isVisibleThoughtBody, presentThoughtBody } from "./thought-body";
 
 type Sql = <T = Record<string, string | number | boolean | null>>(
   strings: TemplateStringsArray,
@@ -133,7 +134,7 @@ export class SqlStore implements SessionStore {
           id, session_id, lineage_id, suggestion_id, parent_id, body, distance_to_core, created_at
         ) VALUES (
           ${thoughtId}, ${sessionId}, ${session.lineage_id}, ${lineage?.suggestion_id ?? null}, ${thought.parentId},
-          ${thought.body}, ${thought.distanceToCore}, ${Date.now()}
+          ${presentThoughtBody(thought.body) || thought.body}, ${thought.distanceToCore}, ${Date.now()}
         )
       `;
       this.sql`
@@ -236,10 +237,14 @@ export class SqlStore implements SessionStore {
 
   recentLine(lineageId: string | null): string {
     if (!lineageId) return "";
-    return this.sql<{ body: string }>`
+    const rows = this.sql<{ body: string }>`
       SELECT body FROM thoughts WHERE lineage_id = ${lineageId}
-      ORDER BY created_at DESC LIMIT 1
-    `[0]?.body ?? "";
+      ORDER BY created_at DESC LIMIT 20
+    `;
+    for (const row of rows) {
+      if (isVisibleThoughtBody(row.body)) return presentThoughtBody(row.body);
+    }
+    return "";
   }
 
   legalUnderlyingBrief(): BriefType | undefined {

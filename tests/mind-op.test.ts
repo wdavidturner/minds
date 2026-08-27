@@ -12,6 +12,7 @@ function view(overrides: Partial<OperatorView> = {}): OperatorView {
     inbox: [],
     activeLineage: { kind: "core", status: "exploring" },
     lastSession: null,
+    name: "Family hub",
     model: "@cf/zai-org/glm-4.7-flash",
     modelOverride: "",
     ...overrides,
@@ -19,25 +20,41 @@ function view(overrides: Partial<OperatorView> = {}): OperatorView {
 }
 
 describe("mindOperator", () => {
-  it("uses a compact chrome with back, public, pause, and model", () => {
+  it("uses a compact chrome with a text back-link, public, pause, and dashboards", () => {
     const html = mindOperator("family-hub-one", view());
+    expect(html).toContain('class="op-back" href="/op/directory"');
     expect(html).toContain("Go back to directory");
-    expect(html).toContain('href="/op/directory"');
+    expect(html).not.toMatch(/class="btn[^"]*" href="\/op\/directory"/);
     expect(html).toContain('class="btn" href="/minds/family-hub-one"');
     expect(html).toContain("Public page");
     expect(html).toContain('class="op-chrome"');
     expect(html).toContain(">Pause<");
     expect(html).not.toContain(">Resume<");
+  });
+
+  it("displays the Mind name rather than the slug", () => {
+    const html = mindOperator("family-hub-one", view());
+    expect(html).toContain("<h1>Family hub</h1>");
+    expect(html).toContain("<title>Family hub — Minds</title>");
+    expect(html).not.toContain("<h1>family-hub-one</h1>");
+  });
+
+  it("keeps the model selector in the main body, not the chrome", () => {
+    const html = mindOperator("family-hub-one", view());
+    const chrome = html.slice(html.indexOf('class="op-chrome"'), html.indexOf("<h1>"));
+    expect(chrome).not.toContain('name="model"');
     expect(html).toContain('action="/op/minds/family-hub-one/model"');
     expect(html).toContain("onchange=");
     expect(html).toContain("@cf/zai-org/glm-5.3-flash");
+    expect(html).toMatch(/operator-status[\s\S]*name="model"/);
   });
 
-  it("links to the Cloudflare worker dashboard and observability traces", () => {
+  it("links to the worker dashboard as Agent dashboard and to observability traces", () => {
     const html = mindOperator("family-hub-one", view());
     expect(html).toContain(workerDashboardUrl());
     expect(html).toContain(workerObservabilityUrl("family-hub-one"));
-    expect(html).toContain("Cloudflare dashboard");
+    expect(html).toContain("Agent dashboard");
+    expect(html).not.toContain("Cloudflare dashboard");
     expect(html).toContain("Logs &amp; traces");
   });
 

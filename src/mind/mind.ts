@@ -23,6 +23,8 @@ import { buildPonderPrompt } from "./prompt";
 import { MIND_DDL, MIND_FLAGS_DDL } from "./schema";
 import { SqlStore } from "./sql-store";
 import { runSession, type ModelStep, type ThoughtRecord } from "./session-loop";
+import { isVisibleThoughtBody, presentThoughtBody, thoughtFromModelStep } from "./thought-body";
+import { buildLearningSummaryPrompt, shouldRewriteLearningSummary } from "./learning-summary";
 import { checkOutcome } from "./tool-guards";
 import { activeLineageOrFallback, type VerbLineage } from "./verbs";
 import type { BriefType, Outcome } from "../types";
@@ -111,6 +113,13 @@ export class Mind extends Think<Env> {
       .some((column) => column.name === "model");
     if (!hasModel) {
       statement(this.sql.bind(this), "ALTER TABLE identity ADD COLUMN model TEXT");
+    }
+    const identityColumns = this.sql<{ name: string }>`PRAGMA table_info(identity)`;
+    if (!identityColumns.some((column) => column.name === "learned_summary")) {
+      statement(this.sql.bind(this), "ALTER TABLE identity ADD COLUMN learned_summary TEXT");
+    }
+    if (!identityColumns.some((column) => column.name === "learned_at")) {
+      statement(this.sql.bind(this), "ALTER TABLE identity ADD COLUMN learned_at INTEGER");
     }
   }
 
@@ -246,7 +255,12 @@ export class Mind extends Think<Env> {
     // model call or a workspace write failure must never leave the Mind
     // without a scheduled wake (that would kill it silently).
     try {
-      await runSession(store, this.modelStep(store, controller.signal), Date.now);
+      const result = await runSession(store, this.modelStep(store, controller.signal), Date.now);
+      try {
+        await this.rewriteLearningSummary(result.sessionId);
+      } catch (error) {
+        console.error("Learning summary rewrite failed:", error);
+      }
     } catch (error) {
       console.error("Mind ponder session failed:", error);
     } finally {
@@ -301,7 +315,7 @@ export class Mind extends Think<Env> {
             SELECT id, body, lineage_id, created_at FROM thoughts
             WHERE body LIKE ${`%${query}%`}
             ORDER BY created_at DESC LIMIT 20
-          `,
+          `.map((row) => ({ ...row, body: presentThoughtBody(row.body) || row.body })),
         }),
       }),
       fetch_url: tool({
@@ -384,11 +398,11 @@ export class Mind extends Think<Env> {
             },
           }),
         },
-        maxOutputTokens: 500,
+        maxOutputTokens: 2048,
       });
 
       return {
-        thought: thought ?? { body: result.text || "Continue examining the core.", distanceToCore: 0, parentId: null },
+        thought: thoughtFromModelStep(thought, result.text),
         outcome,
         agendaTexts,
         suggestionId,
@@ -474,6 +488,7 @@ export class Mind extends Think<Env> {
         : null,
       model: resolveMindModel(identity?.model, this.env.MODEL),
       modelOverride: identity?.model ?? "",
+      name: identity?.name ?? "",
     };
   }
 
@@ -496,6 +511,36 @@ export class Mind extends Think<Env> {
     } catch {
       return null;
     }
+  }
+
+  private async rewriteLearningSummary(sessionId: string): Promise<void> {
+    const newThoughts = this.sql<{ body: string }>`
+      SELECT body FROM thoughts WHERE session_id = ${sessionId} ORDER BY created_at
+    `
+      .map((row) => presentThoughtBody(row.body))
+      .filter((body) => isVisibleThoughtBody(body));
+    if (!shouldRewriteLearningSummary(newThoughts)) return;
+
+    const identity = this.sql<IdentityRow>`SELECT * FROM identity LIMIT 1`[0];
+    if (!identity) return;
+
+    const result = await generateText({
+      model: this.getModel(),
+      system:
+        "You write a growing brief of what a Mind has learned. Output only the rewritten summary.",
+      prompt: buildLearningSummaryPrompt({
+        name: identity.name,
+        core: identity.core,
+        previous: identity.learned_summary ?? "",
+        newThoughts,
+      }),
+      maxOutputTokens: 1200,
+    });
+    const text = result.text.trim();
+    if (!text) return;
+    this.sql`
+      UPDATE identity SET learned_summary = ${text}, learned_at = ${Date.now()}
+    `;
   }
 
   private async markStorageFull(): Promise<void> {

@@ -1,8 +1,8 @@
 import { getAgentByName, routeAgentRequest } from "agents";
-import { isOperator, operatorCookieHeader, unauthorized } from "./auth";
+import { isOperator, unauthorized } from "./auth";
 import { directoryDashboard } from "./html/directory-dashboard";
 import { gallery, type MindCard } from "./html/gallery";
-import { login } from "./html/login";
+import { login, loginPostResponse } from "./html/login";
 import { mindOperator } from "./html/mind-op";
 import { mindPublic } from "./html/mind-public";
 import { newMindForm } from "./html/new-mind-form";
@@ -70,22 +70,27 @@ export default {
     const route = matchRoute(url.pathname);
     if (route.kind === "gallery" && request.method === "GET") {
       const minds = (await (await directory(env)).listMinds()) as unknown as MindCard[];
-      return new Response(gallery(minds), {
+      return new Response(gallery(minds, { operator: isOperator(request, env.OPERATOR_TOKEN) }), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     }
 
-    if (route.kind === "login" && request.method === "GET") {
-      return new Response(login(), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (route.kind === "login") {
+      if (request.method === "GET") {
+        return new Response(login(), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+      }
+      if (request.method === "POST") {
+        const token = formText(await request.formData(), "token");
+        return loginPostResponse(token, env.OPERATOR_TOKEN, url.protocol === "https:");
+      }
     }
 
-    if (url.pathname === "/op/login" && request.method === "POST") {
-      const token = formText(await request.formData(), "token");
-      if (!env.OPERATOR_TOKEN || token !== env.OPERATOR_TOKEN) return unauthorized();
-      return new Response(null, {
-        status: 303,
-        headers: { Location: "/", "Set-Cookie": operatorCookieHeader(token) },
-      });
+    if (url.pathname === "/op/login") {
+      if (request.method === "GET") return redirect("/login");
+      if (request.method === "POST") {
+        const token = formText(await request.formData(), "token");
+        return loginPostResponse(token, env.OPERATOR_TOKEN, url.protocol === "https:");
+      }
     }
 
     if (route.kind === "mind-public" && request.method === "GET") {

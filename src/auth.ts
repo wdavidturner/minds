@@ -33,20 +33,31 @@ function timingSafeEqual(a: string, b: string): boolean {
   return mismatch === 0;
 }
 
+export function matchesOperatorToken(
+  submitted: string,
+  expected: string | undefined,
+): boolean {
+  if (!expected) return false;
+  return timingSafeEqual(submitted, expected);
+}
+
 export function isOperator(
   request: Request,
   token: string | undefined,
 ): boolean {
-  if (!token) return false;
   const provided = readOperatorToken(request);
   if (provided === null) return false;
-  return timingSafeEqual(provided, token);
+  return matchesOperatorToken(provided, token);
 }
 
 export function unauthorized(): Response {
   return new Response(null, { status: 401 });
 }
 
-export function operatorCookieHeader(token: string): string {
-  return `${OPERATOR_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax`;
+export function operatorCookieHeader(
+  token: string,
+  options: { secure?: boolean } = {},
+): string {
+  const secure = options.secure ? "; Secure" : "";
+  return `${OPERATOR_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax${secure}`;
 }

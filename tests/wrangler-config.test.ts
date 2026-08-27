@@ -11,4 +11,14 @@ describe("wrangler.jsonc", () => {
       run_worker_first: true,
     });
   });
+
+  it("attaches the production custom domain", () => {
+    expect(config.routes).toEqual([
+      { pattern: "minds.intentionality.software", custom_domain: true },
+    ]);
+  });
+
+  it("pins the Intentionality Software account for CI deploys", () => {
+    expect(config.account_id).toBe("5a8e7d04d1a54d85c74cb6fc50336a45");
+  });
 });

@@ -18,6 +18,7 @@ export type OperatorView = {
   } | null;
   model: string;
   modelOverride: string;
+  name: string;
 };
 
 function activity(view: OperatorView): string {
@@ -47,30 +48,27 @@ function queuedList(view: OperatorView): string {
 
 export function mindOperator(slug: string, view: OperatorView): string {
   const action = `/op/minds/${encodeURIComponent(slug)}`;
-  const safeSlug = escapeHtml(slug);
   const publicHref = `/minds/${encodeURIComponent(slug)}`;
   const storageAlert = view.storageFull
     ? `<p role="alert">Storage is full. Thought writes are paused and a long retry has been scheduled.</p>`
     : "";
   const wakeLabel = view.paused ? "Resume" : "Pause";
   const wakePath = view.paused ? "resume" : "pause";
+  const titleName = view.name.trim() || slug;
   return layout(
-    `${slug} — Minds`,
+    `${titleName} — Minds`,
     `<header class="op-chrome">
-  <a class="btn ghost" href="/op/directory">Go back to directory</a>
+  <a class="op-back" href="/op/directory">Go back to directory</a>
   <div class="op-chrome-end">
-    <form class="inline-form" method="post" action="${action}/model">
-      ${modelSelect(view.modelOverride, { compact: true })}
-    </form>
     <a class="btn" href="${publicHref}">Public page</a>
-    <a class="btn ghost" href="${escapeHtml(workerDashboardUrl())}" target="_blank" rel="noreferrer">Cloudflare dashboard</a>
+    <a class="btn ghost" href="${escapeHtml(workerDashboardUrl())}" target="_blank" rel="noreferrer">Agent dashboard</a>
     <a class="btn ghost" href="${escapeHtml(workerObservabilityUrl(slug))}" target="_blank" rel="noreferrer">${escapeHtml("Logs & traces")}</a>
     <form class="inline-form" method="post" action="${action}/${wakePath}">
       <button class="btn${view.paused ? "" : " danger"}" type="submit">${wakeLabel}</button>
     </form>
   </div>
 </header>
-<h1>${safeSlug}</h1>
+<h1>${escapeHtml(titleName)}</h1>
 ${storageAlert}
 <section class="operator-status">
   <p><span class="status">${escapeHtml(activity(view))}</span></p>
@@ -82,6 +80,9 @@ ${storageAlert}
     <dt>Last session</dt>
     <dd>${escapeHtml(lastSessionLabel(view))}</dd>
   </dl>
+  <form class="operator-model" method="post" action="${action}/model">
+    ${modelSelect(view.modelOverride, { autosubmit: true })}
+  </form>
 </section>
 <section class="compose">
   <input type="radio" name="compose-tab" id="compose-queue" checked>

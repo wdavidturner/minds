@@ -58,7 +58,9 @@ export function buildPonderPrompt(input: {
     lines.push(`Agenda item you are pursuing: ${input.text.agendaItemText}`);
   }
 
-  lines.push("Use record_thought once. Use set_outcome only with a legal outcome when ready.");
+  lines.push(
+    "Use record_thought once as a tool call, never as XML or plaintext markup. Use set_outcome only with a legal outcome when ready.",
+  );
 
   return lines.join("\n\n");
 }

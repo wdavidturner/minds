@@ -8,7 +8,6 @@ function card(mind: MindCard): string {
   <a class="dir-card-main" href="${op}">
     <p class="eyebrow">${escapeHtml(mind.status)}</p>
     <h2>${escapeHtml(mind.name)}</h2>
-    <p class="slug">${escapeHtml(mind.slug)}</p>
     <p class="topic">${escapeHtml(mind.core_summary)}</p>
   </a>
   <p class="dir-card-meta">

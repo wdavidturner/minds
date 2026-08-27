@@ -1,15 +1,22 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "minds",
+  "account_id": "5a8e7d04d1a54d85c74cb6fc50336a45",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-26",
-  "compatibility_flags": ["nodejs_compat", "experimental"],
+  "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "MODEL": "@cf/zai-org/glm-4.7-flash"
   },
   "ai": {
     "binding": "AI"
   },
+  "routes": [
+    {
+      "pattern": "minds.intentionality.software",
+      "custom_domain": true
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

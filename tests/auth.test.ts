@@ -83,4 +83,8 @@ describe("operatorCookieHeader", () => {
   it("sets SameSite so the cookie is not sent cross-site", () => {
     expect(operatorCookieHeader("secret")).toMatch(/SameSite=Lax/i);
   });
+
+  it("sets Secure on HTTPS cookies", () => {
+    expect(operatorCookieHeader("secret", { secure: true })).toMatch(/;\s*Secure(?:;|$)/);
+  });
 });

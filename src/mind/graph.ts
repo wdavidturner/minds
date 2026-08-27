@@ -4,6 +4,7 @@ import type {
   LineageStatus,
   Outcome,
 } from "../types";
+import { isVisibleThoughtBody, presentThoughtBody } from "./thought-body";
 
 export type IdentityRow = {
   slug: string;
@@ -14,6 +15,8 @@ export type IdentityRow = {
   paused: number;
   created_at: number;
   model?: string | null;
+  learned_summary?: string | null;
+  learned_at?: number | null;
 };
 
 export type LineageRow = {
@@ -68,6 +71,8 @@ export type GraphPayload = {
   sessions: SessionRow[];
   thoughts: ThoughtRow[];
   agenda: AgendaItemRow[];
+  learned: string;
+  learnedAt: number | null;
 };
 
 export function buildGraphPayload(
@@ -87,9 +92,16 @@ export function buildGraphPayload(
     slug: identity.slug,
     name: identity.name,
     core: identity.core,
+    learned: identity.learned_summary?.trim() ?? "",
+    learnedAt: identity.learned_at ?? null,
     lineages: [...lineageRows],
     sessions: [...sessionRows],
-    thoughts: [...thoughtRows],
+    thoughts: thoughtRows
+      .map((row) => ({
+        ...row,
+        body: presentThoughtBody(row.body),
+      }))
+      .filter((row) => isVisibleThoughtBody(row.body)),
     agenda: [...agendaItemRows],
   };
 }

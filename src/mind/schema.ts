@@ -6,7 +6,9 @@ export const MIND_DDL = `CREATE TABLE IF NOT EXISTS identity (
   temperament_json TEXT NOT NULL,
   paused INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
-  model TEXT
+  model TEXT,
+  learned_summary TEXT,
+  learned_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS suggestions (

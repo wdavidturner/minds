@@ -32,6 +32,8 @@ Headlong’s idea of **persistent agency** is the point: the agent keeps thinkin
 
 That is the shape Minds is aiming at. If you want the real thing — never-asleep agency, recursive `shellm`, bash all the way down — run Headlong. This repo is not a port of Headlong or `shellm`. It is a Cloudflare experiment that borrows the philosophy and then does something smaller and different: isolated Minds, a core rail, hibernation between sessions, and a public thought graph.
 
+Production is at [minds.intentionality.software](https://minds.intentionality.software).
+
 ## Deploy
 
 Authenticate Wrangler, store the operator token as a secret, and deploy:

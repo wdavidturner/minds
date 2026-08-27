@@ -6,6 +6,10 @@ export function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+export function brandMark(): string {
+  return `<span class="brand-mark" aria-hidden="true">🧠</span>`;
+}
+
 export function layout(
   title: string,
   body: string,

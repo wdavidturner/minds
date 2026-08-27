@@ -155,6 +155,26 @@ describe("runSession", () => {
     expect(state.wake).toBe(720);
   });
 
+  it("does not record placeholder thoughts toward the session count", async () => {
+    const { store, state } = createStore();
+    let t = 0;
+    let calls = 0;
+    const model: ModelStep = async () => {
+      calls++;
+      t += 1_000;
+      if (calls < 3) return { thought: thought("Continue examining the core.") };
+      return { thought: thought("A real observation."), endSession: true };
+    };
+
+    const result = await runSession(store, model, () => t, {
+      minThoughts: 1,
+      alarmWallMs: 10_000,
+    });
+
+    expect(state.thoughts.map((item) => item.body)).toEqual(["A real observation."]);
+    expect(result.thoughtCount).toBe(1);
+  });
+
   it("exits with continue_line before the minimum thought count when aborted", async () => {
     const { store, state } = createStore();
     store.isAborted = () => true;

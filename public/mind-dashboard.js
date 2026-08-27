@@ -25,9 +25,10 @@ function age(ms) {
 function activity(graph) {
   if (graph.paused) return "paused";
   if (graph.pondering) return "thinking";
-  const latest = graph.thoughts?.at(-1);
+  const visible = (graph.thoughts ?? []).filter((thought) => isVisibleThought(thought.body));
+  const latest = visible.at(-1);
   if (latest && Date.now() - latest.created_at < 8000) return "thinking";
-  if (!graph.thoughts?.length) return "waking";
+  if (!visible.length) return "waking";
   return "hibernating";
 }
 
@@ -48,15 +49,26 @@ function applyStatus(root, graph) {
   if (status) {
     status.innerHTML = `<span class="status-dot ${escapeHtml(state)}${pulse}"></span>${escapeHtml(state)}`;
   }
-  const chip = root.querySelector(".support-chip");
-  if (chip) {
-    chip.classList.toggle("attention", state === "thinking");
-    chip.innerHTML = `<span class="status-dot ${escapeHtml(state)}${pulse}"></span>${escapeHtml(state)}`;
+  const brandName = root.querySelector(".brand small");
+  if (brandName && graph.name) {
+    brandName.textContent = graph.name;
   }
-  const metrics = root.querySelectorAll(".rail-metrics dd");
-  if (metrics[0]) metrics[0].textContent = String(graph.thoughts?.length ?? 0);
-  if (metrics[1]) metrics[1].textContent = String(graph.sessions?.length ?? 0);
-  if (metrics[2]) metrics[2].textContent = String(liveLineages(graph).length);
+  setMetric(root, "thoughts", String((graph.thoughts ?? []).filter((thought) => isVisibleThought(thought.body)).length));
+  setMetric(root, "sessions", String(graph.sessions?.length ?? 0));
+  setMetric(root, "open-lines", String(liveLineages(graph).length));
+  setMetric(
+    root,
+    "queue",
+    String((graph.agenda ?? []).filter((item) => item.status === "pending" || item.status === "active").length),
+  );
+  const visible = (graph.thoughts ?? []).filter((thought) => isVisibleThought(thought.body));
+  const latest = visible.at(-1);
+  setMetric(root, "latest", latest ? age(latest.created_at) : "—");
+}
+
+function setMetric(root, name, value) {
+  const node = root.querySelector(`[data-metric="${name}"] b`);
+  if (node) node.textContent = value;
 }
 
 function applyExploring(root, graph) {
@@ -111,18 +123,49 @@ function applyDeadEnds(root, graph) {
       .join("") || `<li class="empty-copy">No parked or unrelated lines yet.</li>`;
 }
 
+function thoughtBody(raw) {
+  const text = String(raw ?? "").trim();
+  if (!text) return "";
+  const dumped = /<tool_call\b|<arg_key>/i.test(text);
+  const bodyMatch = text.match(/<arg_key>\s*body\s*<\/arg_key>\s*<arg_value>([\s\S]*?)(?:<\/arg_value>|$)/i);
+  let source = (bodyMatch ? bodyMatch[1].split(/<arg_key>/i)[0] : dumped ? "" : text)
+    .replace(/<\/?(?:tool_call|arg_key|arg_value)[^>]*>/gi, "")
+    .replace(/^\s*record_thought\s*/i, "")
+    .trim();
+  if (!source) return dumped ? "" : text;
+  if (dumped && !/<\/arg_value>/i.test(text)) {
+    const complete = source.match(/^[\s\S]*[.!?](?=["')\]]|\s|$)/);
+    return (complete ? complete[0] : source).trim();
+  }
+  return source;
+}
+
+function isVisibleThought(raw) {
+  const text = thoughtBody(raw);
+  if (!text) return false;
+  if (/^continue examining the core\.?$/i.test(text)) return false;
+  if (/tool_call|arg_key|arg_value/i.test(text)) return false;
+  return true;
+}
+
+function shortThoughtId(id) {
+  const value = String(id ?? "");
+  return value.length <= 8 ? value : value.slice(0, 8);
+}
+
 function thoughtItem(thought, fresh) {
   const li = document.createElement("li");
+  li.id = `thought-${thought.id}`;
   li.dataset.thoughtId = thought.id;
   if (fresh) li.classList.add("fresh");
-  li.innerHTML = `<p>${escapeHtml(thought.body)}</p><small>${escapeHtml(age(thought.created_at))} · distance ${Number(thought.distance_to_core).toFixed(2)}</small>`;
+  li.innerHTML = `<p>${escapeHtml(thoughtBody(thought.body))}</p><small><time datetime="${escapeHtml(new Date(thought.created_at).toISOString())}">${escapeHtml(age(thought.created_at))}</time> · <code class="thought-id">${escapeHtml(shortThoughtId(thought.id))}</code> · distance ${Number(thought.distance_to_core).toFixed(2)}</small>`;
   return li;
 }
 
 function applyStream(root, graph) {
   const list = root.querySelector("#thought-stream");
   if (!list) return;
-  const thoughts = graph.thoughts ?? [];
+  const thoughts = (graph.thoughts ?? []).filter((thought) => isVisibleThought(thought.body));
   if (thoughts.length === 0) return;
   const empty = list.querySelector(".empty-copy");
   if (empty) empty.remove();
@@ -130,6 +173,38 @@ function applyStream(root, graph) {
   for (const thought of thoughts) {
     if (seen.has(thought.id)) continue;
     list.prepend(thoughtItem(thought, true));
+  }
+  applyThoughtSearch(root);
+}
+
+function applyThoughtSearch(root) {
+  const input = root.querySelector("[data-thought-search]");
+  const list = root.querySelector("#thought-stream");
+  if (!input || !list) return;
+  const query = String(input.value ?? "").trim().toLowerCase();
+  for (const item of list.querySelectorAll("li[data-thought-id]")) {
+    const text = item.querySelector("p")?.textContent?.toLowerCase() ?? "";
+    item.hidden = Boolean(query) && !text.includes(query);
+  }
+}
+
+function learnedParagraphs(text) {
+  return String(text ?? "")
+    .split(/\n\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function applyLearned(root, graph) {
+  const copy = root.querySelector("#learned-copy");
+  if (!copy) return;
+  const paragraphs = learnedParagraphs(graph.learned);
+  copy.innerHTML = paragraphs.length
+    ? paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")
+    : `<p class="empty-copy">Nothing folded into a brief yet. After a session lands real observations, this becomes a readable summary of what it has figured out.</p>`;
+  const stamp = root.querySelector("#learned .map-head > span");
+  if (stamp) {
+    stamp.textContent = graph.learnedAt ? `updated ${age(graph.learnedAt)}` : "rewritten as it learns";
   }
 }
 
@@ -142,6 +217,7 @@ async function tick() {
   if (!response.ok) return;
   const graph = await response.json();
   applyStatus(root, graph);
+  applyLearned(root, graph);
   applyExploring(root, graph);
   applyNext(root, graph);
   applyStream(root, graph);
@@ -150,7 +226,12 @@ async function tick() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  if (!shell()) return;
+  const root = shell();
+  if (!root) return;
+  const search = root.querySelector("[data-thought-search]");
+  if (search) {
+    search.addEventListener("input", () => applyThoughtSearch(root));
+  }
   tick().catch(() => {});
   window.setInterval(() => {
     tick().catch(() => {});

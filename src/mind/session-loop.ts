@@ -2,6 +2,7 @@ import { applyOutcome, nextWakeSeconds, type ApplyResult } from "./apply-outcome
 import { decideBrief, legalOutcomes, mayEndSession } from "./brief";
 import { DEFAULTS } from "../defaults";
 import type { BriefType, MindSnapshot, Outcome } from "../types";
+import { isVisibleThoughtBody } from "./thought-body";
 
 export type ThoughtRecord = {
   body: string;
@@ -85,8 +86,10 @@ export async function runSession(
 
     if (store.isAborted?.()) break;
 
-    await store.recordThought(sessionId, step.thought);
-    count++;
+    if (isVisibleThoughtBody(step.thought.body)) {
+      await store.recordThought(sessionId, step.thought);
+      count++;
+    }
     if (step.wakeSecondsOverride !== undefined) explicitWakeSeconds = step.wakeSecondsOverride;
     if (store.isWriteStopped?.()) break;
 

@@ -86,6 +86,7 @@ describe("buildPonderPrompt", () => {
     });
 
     expect(prompt).toContain("Minimum thoughts this session: 8");
+    expect(prompt).toContain("never as XML");
   });
 
   it("omits operator-text sections that have nothing to say", () => {

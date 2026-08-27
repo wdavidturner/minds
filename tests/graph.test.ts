@@ -77,6 +77,8 @@ describe("buildGraphPayload", () => {
       slug: "sample-mind",
       name: "Sample Mind",
       core: "Notice patterns in ordinary things.",
+      learned: "",
+      learnedAt: null,
       lineages: [
         {
           id: "lineage-core",
@@ -134,6 +136,108 @@ describe("buildGraphPayload", () => {
       ],
     });
   });
+
+  it("strips dumped tool-call markup from thought bodies", () => {
+    const payload = buildGraphPayload(
+      [
+        {
+          slug: "sample-mind",
+          name: "Sample Mind",
+          persona: "A careful observer.",
+          core: "Notice patterns in ordinary things.",
+          temperament_json: '{"curiosity":0.5}',
+          paused: 0,
+          created_at: 1_000,
+        },
+      ],
+      [],
+      [],
+      [
+        {
+          id: "thought-1",
+          session_id: "session-1",
+          lineage_id: "lineage-core",
+          suggestion_id: null,
+          parent_id: null,
+          body: `<tool_call>record_thought<arg_key>body</arg_key><arg_value>Banks set the pace.</arg_value>`,
+          distance_to_core: 0.25,
+          created_at: 1_004,
+        },
+      ],
+      [],
+    );
+
+    expect(payload.thoughts[0].body).toBe("Banks set the pace.");
+    expect(payload.thoughts[0].body).not.toContain("tool_call");
+  });
+
+  it("omits placeholder examining-the-core thoughts from the public graph", () => {
+    const payload = buildGraphPayload(
+      [
+        {
+          slug: "sample-mind",
+          name: "Sample Mind",
+          persona: "A careful observer.",
+          core: "Notice patterns in ordinary things.",
+          temperament_json: '{"curiosity":0.5}',
+          paused: 0,
+          created_at: 1_000,
+        },
+      ],
+      [],
+      [],
+      [
+        {
+          id: "thought-1",
+          session_id: "session-1",
+          lineage_id: "lineage-core",
+          suggestion_id: null,
+          parent_id: null,
+          body: "Continue examining the core.",
+          distance_to_core: 0,
+          created_at: 1_004,
+        },
+        {
+          id: "thought-2",
+          session_id: "session-1",
+          lineage_id: "lineage-core",
+          suggestion_id: null,
+          parent_id: null,
+          body: "A certification is a moat.",
+          distance_to_core: 0.2,
+          created_at: 1_005,
+        },
+      ],
+      [],
+    );
+
+    expect(payload.thoughts.map((thought) => thought.body)).toEqual(["A certification is a moat."]);
+  });
+
+  it("includes a learned summary from identity when present", () => {
+    const payload = buildGraphPayload(
+      [
+        {
+          slug: "sample-mind",
+          name: "Sample Mind",
+          persona: "A careful observer.",
+          core: "Notice patterns in ordinary things.",
+          temperament_json: '{"curiosity":0.5}',
+          paused: 0,
+          created_at: 1_000,
+          learned_summary: "Banking access is the first choke point.",
+          learned_at: 1_700,
+        },
+      ],
+      [],
+      [],
+      [],
+      [],
+    );
+
+    expect(payload.learned).toBe("Banking access is the first choke point.");
+    expect(payload.learnedAt).toBe(1_700);
+  });
 });
 
 describe("MIND_DDL", () => {
@@ -146,7 +250,9 @@ describe("MIND_DDL", () => {
   temperament_json TEXT NOT NULL,
   paused INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
-  model TEXT
+  model TEXT,
+  learned_summary TEXT,
+  learned_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS suggestions (

@@ -14,9 +14,9 @@ describe("directoryDashboard", () => {
   it("lists minds as cards that open the operator view", () => {
     const html = directoryDashboard(minds);
     expect(html).toContain("Family hub");
-    expect(html).toContain("family-hub-one");
     expect(html).toContain("Topic: family hub");
     expect(html).toContain('href="/minds/family-hub-one/op"');
+    expect(html).not.toContain('class="slug"');
     expect(html).toContain("live");
     expect(html).not.toContain("/op/directory/chat");
   });

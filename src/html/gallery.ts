@@ -1,4 +1,4 @@
-import { escapeHtml, layout } from "./layout";
+import { brandMark, escapeHtml, layout } from "./layout";
 
 export type MindCard = {
   slug: string;
@@ -14,7 +14,6 @@ function card(mind: MindCard): string {
   <div class="dir-card-main">
     <p class="eyebrow">${escapeHtml(mind.status)}</p>
     <h2>${escapeHtml(mind.name)}</h2>
-    <p class="slug">${escapeHtml(mind.slug)}</p>
     <p class="topic">${escapeHtml(mind.core_summary)}</p>
   </div>
   <p class="dir-card-actions">
@@ -24,17 +23,23 @@ function card(mind: MindCard): string {
 </article>`;
 }
 
-export function gallery(minds: readonly MindCard[]): string {
+export function gallery(
+  minds: readonly MindCard[],
+  options: { operator?: boolean } = {},
+): string {
   const cards = minds.map(card).join("");
+  const operatorLink = options.operator
+    ? `<a class="primary" href="/op/directory">Operator panel</a>`
+    : "";
   return layout(
     "Minds",
     `<header class="dir-head">
   <div>
     <p class="eyebrow">Gallery</p>
-    <h1>Minds</h1>
+    <h1 class="site-title">${brandMark()} Minds</h1>
     <p class="lede">Public traces of inner monologues. Open a card’s public page to watch, or the operator panel to steer.</p>
   </div>
-  <a class="primary" href="/op/directory">Operator panel</a>
+  ${operatorLink}
 </header>
 <section class="dir-grid">${cards || "<p class=\"empty-copy\">No minds yet.</p>"}</section>`,
   );
