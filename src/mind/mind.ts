@@ -26,6 +26,8 @@ const outcomes = [
   "ignore_inbox",
 ] as const;
 
+class HumanTurnHandled extends Error {}
+
 function statement(sql: (strings: TemplateStringsArray) => unknown, query: string): void {
   const strings = Object.assign([query], { raw: [query] }) as unknown as TemplateStringsArray;
   sql(strings);
@@ -172,12 +174,17 @@ export class Mind extends Think<Env> {
     await this.schedule(store.wakeSeconds, "runPonder", {});
   }
 
-  async beforeTurn(ctx: TurnContext): Promise<{ maxSteps: number } | void> {
+  async beforeTurn(ctx: TurnContext): Promise<void> {
     if (ctx.continuation) return;
     const text = this.latestUserText(ctx.messages);
     if (!text) return;
     await this.talk(text);
-    return { maxSteps: 0 };
+    throw new HumanTurnHandled();
+  }
+
+  onChatError(error: unknown): unknown {
+    if (error instanceof HumanTurnHandled) return;
+    return error;
   }
 
   getTools() {
