@@ -1,4 +1,5 @@
 import { Think, type TurnContext } from "@cloudflare/think";
+import type { LanguageModelV3 } from "@ai-sdk/provider";
 import { callable, type RetryOptions } from "agents";
 import { generateText, tool } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
@@ -26,7 +27,41 @@ const outcomes = [
   "ignore_inbox",
 ] as const;
 
-class HumanTurnHandled extends Error {}
+const humanTurnNoOpModel: LanguageModelV3 = {
+  specificationVersion: "v3",
+  provider: "mind-local",
+  modelId: "human-turn-noop",
+  supportedUrls: {},
+  async doGenerate() {
+    return {
+      content: [],
+      finishReason: { unified: "stop", raw: "stop" },
+      usage: {
+        inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+        outputTokens: { total: 0, text: 0, reasoning: 0 },
+      },
+      warnings: [],
+    };
+  },
+  async doStream() {
+    return {
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          controller.enqueue({
+            type: "finish",
+            finishReason: { unified: "stop", raw: "stop" },
+            usage: {
+              inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 0, text: 0, reasoning: 0 },
+            },
+          });
+          controller.close();
+        },
+      }),
+    };
+  },
+};
 
 function statement(sql: (strings: TemplateStringsArray) => unknown, query: string): void {
   const strings = Object.assign([query], { raw: [query] }) as unknown as TemplateStringsArray;
@@ -174,17 +209,12 @@ export class Mind extends Think<Env> {
     await this.schedule(store.wakeSeconds, "runPonder", {});
   }
 
-  async beforeTurn(ctx: TurnContext): Promise<void> {
+  async beforeTurn(ctx: TurnContext): Promise<{ model: LanguageModelV3 } | void> {
     if (ctx.continuation) return;
     const text = this.latestUserText(ctx.messages);
     if (!text) return;
     await this.talk(text);
-    throw new HumanTurnHandled();
-  }
-
-  onChatError(error: unknown): unknown {
-    if (error instanceof HumanTurnHandled) return;
-    return error;
+    return { model: humanTurnNoOpModel };
   }
 
   getTools() {
