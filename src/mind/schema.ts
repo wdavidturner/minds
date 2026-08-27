@@ -64,3 +64,8 @@ CREATE TABLE IF NOT EXISTS agenda_items (
   text TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'done'))
 );`;
+
+export const MIND_FLAGS_DDL = `CREATE TABLE IF NOT EXISTS flags (
+  force_pending INTEGER NOT NULL DEFAULT 0,
+  talk_pending INTEGER NOT NULL DEFAULT 0
+);`;
